@@ -3,16 +3,12 @@ import { createMcpHandler } from "../../../packages/agents/src/mcp/server/index"
 import { z } from "zod";
 
 interface Env {
-  PUBLISHER_URL?: string;
+  PUBLISHER: Fetcher;
   PUBLISH_TOKEN?: string;
 }
 
-const DEFAULT_PUBLISHER_URL =
+const PUBLIC_PUBLISHER_URL =
   "https://palm-beach-times-publisher.steven-a00.workers.dev";
-
-function getPublisherUrl(env: Env) {
-  return (env.PUBLISHER_URL || DEFAULT_PUBLISHER_URL).replace(/\/+$/, "");
-}
 
 function requirePublishToken(env: Env) {
   const publishToken = env.PUBLISH_TOKEN;
@@ -31,10 +27,16 @@ function textResult(text: string, isError = false) {
   };
 }
 
+function publisherRequest(env: Env, path: string, init?: RequestInit) {
+  return env.PUBLISHER.fetch(
+    new Request(`https://publisher.internal${path}`, init)
+  );
+}
+
 function createServer(env: Env) {
   const server = new McpServer({
     name: "Palm Beach Times Publisher",
-    version: "1.0.1"
+    version: "1.1.0"
   });
 
   server.registerTool(
@@ -55,10 +57,9 @@ function createServer(env: Env) {
     },
     async ({ date, html, title, editionType }) => {
       try {
-        const publisherUrl = getPublisherUrl(env);
         const publishToken = requirePublishToken(env);
 
-        const response = await fetch(`${publisherUrl}/api/publish`, {
+        const response = await publisherRequest(env, "/api/publish", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${publishToken}`,
@@ -81,14 +82,12 @@ function createServer(env: Env) {
           );
         }
 
-        let result: Record<string, unknown>;
+        let result: Record<string, unknown> = {};
         try {
           result = JSON.parse(body) as Record<string, unknown>;
         } catch {
-          return textResult(
-            `The publisher returned an unexpected response: ${body}`,
-            true
-          );
+          // The public URLs below are synthesized intentionally because the
+          // service binding uses an internal hostname when invoking publisher.
         }
 
         return textResult(
@@ -98,8 +97,8 @@ function createServer(env: Env) {
               date: result.date ?? date,
               title: result.title ?? title,
               editionType: result.editionType ?? editionType,
-              url: result.url,
-              todayUrl: result.todayUrl
+              url: `${PUBLIC_PUBLISHER_URL}/${date}`,
+              todayUrl: `${PUBLIC_PUBLISHER_URL}/today`
             },
             null,
             2
@@ -128,12 +127,8 @@ function createServer(env: Env) {
     },
     async ({ date }) => {
       try {
-        const publisherUrl = getPublisherUrl(env);
-        const editionUrl = date
-          ? `${publisherUrl}/${date}`
-          : `${publisherUrl}/today`;
-
-        const response = await fetch(editionUrl, {
+        const path = date ? `/${date}` : "/today";
+        const response = await publisherRequest(env, path, {
           method: "GET",
           redirect: "manual"
         });
@@ -148,7 +143,9 @@ function createServer(env: Env) {
               ok: response.ok,
               status: response.status,
               date: date ?? "today",
-              url: editionUrl
+              url: date
+                ? `${PUBLIC_PUBLISHER_URL}/${date}`
+                : `${PUBLIC_PUBLISHER_URL}/today`
             },
             null,
             2
