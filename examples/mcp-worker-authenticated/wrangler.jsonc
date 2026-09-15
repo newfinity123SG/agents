@@ -4,6 +4,10 @@
   "compatibility_date": "2026-06-11",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/server.ts",
+  "keep_vars": true,
+  "vars": {
+    "ALLOWED_GITHUB_LOGIN": "newfinity123SG"
+  },
   "assets": {
     "not_found_handling": "single-page-application",
     "run_worker_first": [
