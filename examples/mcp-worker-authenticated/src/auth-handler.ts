@@ -6,222 +6,227 @@ import { Hono } from "hono";
 
 interface Env {
   OAUTH_PROVIDER: OAuthHelpers;
+  OAUTH_KV: KVNamespace;
+  GITHUB_CLIENT_ID?: string;
+  GITHUB_CLIENT_SECRET?: string;
+  ALLOWED_GITHUB_LOGIN?: string;
+}
+
+interface GitHubTokenResponse {
+  access_token?: string;
+  token_type?: string;
+  scope?: string;
+  error?: string;
+  error_description?: string;
+}
+
+interface GitHubUser {
+  id: number;
+  login: string;
+  name?: string | null;
 }
 
 const app = new Hono<{ Bindings: Env }>();
+const STATE_COOKIE = "__Host-pbt-oauth-state";
+const STATE_PREFIX = "pbt-oauth-state:";
 
-/**
- * GET /authorize - OAuth authorization endpoint
- *
- * This endpoint is called when an MCP client wants to authorize.
- * In a full implementation, this would:
- * 1. Parse the OAuth request
- * 2. Check if the client is already approved (via cookie)
- * 3. Show an approval dialog or redirect to external OAuth provider
- */
-app.get("/authorize", async (c) => {
-  const oauthReqInfo: AuthRequest = await c.env.OAUTH_PROVIDER.parseAuthRequest(
-    c.req.raw
-  );
-  const clientInfo = await c.env.OAUTH_PROVIDER.lookupClient(
-    oauthReqInfo.clientId
-  );
+function required(value: string | undefined, name: string): string {
+  if (!value) throw new Error(`${name} is not configured`);
+  return value;
+}
 
-  if (!clientInfo) {
-    return c.text("Invalid client_id", 400);
+function stateCookie(state: string): string {
+  return `${STATE_COOKIE}=${encodeURIComponent(state)}; Path=/; Max-Age=600; HttpOnly; Secure; SameSite=Lax`;
+}
+
+function clearStateCookie(): string {
+  return `${STATE_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
+}
+
+function readCookie(request: Request, name: string): string | undefined {
+  const cookie = request.headers.get("Cookie");
+  if (!cookie) return undefined;
+
+  for (const part of cookie.split(";")) {
+    const [rawName, ...rest] = part.trim().split("=");
+    if (rawName === name) {
+      return decodeURIComponent(rest.join("="));
+    }
   }
 
-  // For this demo, we'll show a simple HTML approval page
-  // In a real implementation, you might:
-  // - Check cookies to see if this client was previously approved
-  // - Redirect to an external OAuth provider (GitHub, Google, etc.)
-  // - Show a custom approval UI
-  const approvalPage = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Authorize ${clientInfo.clientName || "MCP Client"}</title>
-        <style>
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            max-width: 600px;
-            margin: 50px auto;
-            padding: 20px;
-            line-height: 1.6;
-          }
-          .card {
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            padding: 30px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-          }
-          h1 { margin-top: 0; }
-          .client-info {
-            background: #f5f5f5;
-            padding: 15px;
-            border-radius: 4px;
-            margin: 20px 0;
-          }
-          .actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 20px;
-          }
-          button {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-          }
-          .approve {
-            background: #0070f3;
-            color: white;
-            flex: 1;
-          }
-          .deny {
-            background: #eee;
-            color: #333;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="card">
-          <h1>Authorization Request</h1>
-          <p><strong>${clientInfo.clientName || "An MCP Client"}</strong> is requesting access to the MCP server.</p>
+  return undefined;
+}
 
-          <div class="client-info">
-            <p><strong>Client ID:</strong> ${clientInfo.clientId}</p>
-            ${clientInfo.clientUri ? `<p><strong>Website:</strong> <a href="${clientInfo.clientUri}" target="_blank">${clientInfo.clientUri}</a></p>` : ""}
-            <p><strong>Requested Scopes:</strong> ${oauthReqInfo.scope.join(", ") || "none"}</p>
-          </div>
+app.get("/authorize", async (c) => {
+  try {
+    const clientId = required(c.env.GITHUB_CLIENT_ID, "GITHUB_CLIENT_ID");
+    required(c.env.GITHUB_CLIENT_SECRET, "GITHUB_CLIENT_SECRET");
+    required(c.env.ALLOWED_GITHUB_LOGIN, "ALLOWED_GITHUB_LOGIN");
 
-          <p>If you approve, this client will be able to:</p>
-          <ul>
-            <li>Access MCP tools on your behalf</li>
-            <li>Receive your authenticated user information</li>
-          </ul>
+    const oauthReqInfo: AuthRequest =
+      await c.env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
 
-          <form method="POST" action="/authorize">
-            <input type="hidden" name="state" value="${btoa(JSON.stringify(oauthReqInfo))}">
-            <div class="actions">
-              <button type="button" class="deny" onclick="window.history.back()">Cancel</button>
-              <button type="submit" class="approve">Approve</button>
-            </div>
-          </form>
-        </div>
-      </body>
-    </html>
-  `;
+    if (!oauthReqInfo.clientId) {
+      return c.text("Invalid OAuth client", 400);
+    }
 
-  return c.html(approvalPage);
+    const state = crypto.randomUUID();
+    await c.env.OAUTH_KV.put(
+      `${STATE_PREFIX}${state}`,
+      JSON.stringify(oauthReqInfo),
+      { expirationTtl: 600 }
+    );
+
+    const callbackUrl = new URL("/callback", c.req.url).href;
+    const githubAuthorize = new URL("https://github.com/login/oauth/authorize");
+    githubAuthorize.searchParams.set("client_id", clientId);
+    githubAuthorize.searchParams.set("redirect_uri", callbackUrl);
+    githubAuthorize.searchParams.set("scope", "read:user");
+    githubAuthorize.searchParams.set("state", state);
+    githubAuthorize.searchParams.set("allow_signup", "false");
+
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: githubAuthorize.toString(),
+        "Set-Cookie": stateCookie(state),
+        "Cache-Control": "no-store"
+      }
+    });
+  } catch (error) {
+    return c.text(
+      error instanceof Error ? error.message : "Authorization failed",
+      500
+    );
+  }
 });
 
-/**
- * POST /authorize - Handle authorization approval
- *
- * This endpoint is called when the user approves the authorization.
- * It completes the OAuth flow by creating a grant and redirecting back to the client.
- */
-app.post("/authorize", async (c) => {
-  const formData = await c.req.formData();
-  const state = formData.get("state");
+app.get("/callback", async (c) => {
+  const state = c.req.query("state");
+  const code = c.req.query("code");
+  const upstreamError = c.req.query("error");
 
-  if (!state || typeof state !== "string") {
-    return c.text("Missing state parameter", 400);
+  if (upstreamError) {
+    return c.text(`GitHub authorization failed: ${upstreamError}`, 400);
   }
+
+  if (!state || !code) {
+    return c.text("Missing GitHub OAuth code or state", 400);
+  }
+
+  const cookieState = readCookie(c.req.raw, STATE_COOKIE);
+  if (!cookieState || cookieState !== state) {
+    return c.text("OAuth state validation failed", 400);
+  }
+
+  const stored = await c.env.OAUTH_KV.get(`${STATE_PREFIX}${state}`);
+  if (!stored) {
+    return c.text("OAuth state expired or was already used", 400);
+  }
+
+  await c.env.OAUTH_KV.delete(`${STATE_PREFIX}${state}`);
 
   let oauthReqInfo: AuthRequest;
   try {
-    oauthReqInfo = JSON.parse(atob(state));
+    oauthReqInfo = JSON.parse(stored) as AuthRequest;
   } catch {
-    return c.text("Invalid state parameter", 400);
+    return c.text("Stored OAuth request is invalid", 400);
   }
 
-  // For this demo, we'll use a static user ID
-  // In a real implementation, you would:
-  // 1. Have already authenticated the user (via external OAuth, session, etc.)
-  // 2. Use their actual user ID and profile information
-  const userId = "demo-user";
-  const userProfile = {
-    userId: "demo-user",
-    username: "Demo User",
-    email: "demo@example.com"
-  };
+  try {
+    const clientId = required(c.env.GITHUB_CLIENT_ID, "GITHUB_CLIENT_ID");
+    const clientSecret = required(
+      c.env.GITHUB_CLIENT_SECRET,
+      "GITHUB_CLIENT_SECRET"
+    );
+    const allowedLogin = required(
+      c.env.ALLOWED_GITHUB_LOGIN,
+      "ALLOWED_GITHUB_LOGIN"
+    );
 
-  // Complete the authorization by creating a grant
-  const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
-    request: oauthReqInfo,
-    userId: userId,
-    metadata: {
-      label: "MCP Server Access",
-      clientName:
-        (await c.env.OAUTH_PROVIDER.lookupClient(oauthReqInfo.clientId))
-          ?.clientName || "Unknown Client"
-    },
-    scope: oauthReqInfo.scope,
-    props: userProfile
-  });
+    const callbackUrl = new URL("/callback", c.req.url).href;
+    const tokenResponse = await fetch(
+      "https://github.com/login/oauth/access_token",
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          code,
+          redirect_uri: callbackUrl
+        })
+      }
+    );
 
-  // Redirect back to the client with the authorization code
-  return c.redirect(redirectTo, 302);
+    const tokenData = (await tokenResponse.json()) as GitHubTokenResponse;
+    if (!tokenResponse.ok || !tokenData.access_token) {
+      return c.text(
+        tokenData.error_description || tokenData.error || "GitHub token exchange failed",
+        400
+      );
+    }
+
+    const userResponse = await fetch("https://api.github.com/user", {
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${tokenData.access_token}`,
+        "User-Agent": "Palm-Beach-Times-MCP",
+        "X-GitHub-Api-Version": "2022-11-28"
+      }
+    });
+
+    if (!userResponse.ok) {
+      return c.text("Unable to read authenticated GitHub user", 502);
+    }
+
+    const user = (await userResponse.json()) as GitHubUser;
+    if (user.login.toLowerCase() !== allowedLogin.toLowerCase()) {
+      return c.text("This GitHub account is not authorized for this MCP server", 403);
+    }
+
+    const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
+      request: oauthReqInfo,
+      userId: String(user.id),
+      metadata: {
+        label: user.name || user.login
+      },
+      scope: oauthReqInfo.scope,
+      props: {
+        githubLogin: user.login,
+        githubUserId: user.id,
+        displayName: user.name || user.login
+      }
+    });
+
+    const headers = new Headers({
+      Location: redirectTo,
+      "Cache-Control": "no-store"
+    });
+    headers.append("Set-Cookie", clearStateCookie());
+
+    return new Response(null, { status: 302, headers });
+  } catch (error) {
+    return c.text(
+      error instanceof Error ? error.message : "OAuth callback failed",
+      500
+    );
+  }
 });
 
-/**
- * GET / - Home page
- *
- * Shows information about the OAuth server
- */
 app.get("/", (c) => {
-  return c.html(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>MCP OAuth Server</title>
-        <style>
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            max-width: 800px;
-            margin: 50px auto;
-            padding: 20px;
-            line-height: 1.6;
-          }
-          h1 { color: #0070f3; }
-          .endpoint {
-            background: #f5f5f5;
-            padding: 10px;
-            border-radius: 4px;
-            margin: 10px 0;
-            font-family: monospace;
-          }
-        </style>
-      </head>
-      <body>
-        <h1>MCP OAuth Server</h1>
-        <p>This is an authenticated MCP server that uses OAuth 2.1 for authorization.</p>
-
-        <h2>Available Endpoints</h2>
-        <div class="endpoint">/mcp - MCP server endpoint (requires Bearer token)</div>
-        <div class="endpoint">/authorize - OAuth authorization endpoint</div>
-        <div class="endpoint">/token - OAuth token endpoint</div>
-        <div class="endpoint">/register - Client registration endpoint</div>
-        <div class="endpoint">/.well-known/oauth-authorization-server - OAuth metadata</div>
-
-        <h2>Getting Started</h2>
-        <p>To connect to this MCP server:</p>
-        <ol>
-          <li>Register your MCP client via the <code>/register</code> endpoint</li>
-          <li>Initiate the OAuth flow by redirecting to <code>/authorize</code></li>
-          <li>Exchange the authorization code for an access token at <code>/token</code></li>
-          <li>Use the access token to access the <code>/mcp</code> endpoint</li>
-        </ol>
-      </body>
-    </html>
-  `);
+  return c.html(`<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Palm Beach Times MCP</title></head>
+<body style="font-family:system-ui;max-width:720px;margin:48px auto;padding:0 20px;line-height:1.5">
+  <h1>Palm Beach Times MCP</h1>
+  <p>Authenticated MCP publisher for The Palm Beach Times.</p>
+  <p><code>/mcp</code> requires OAuth authorization.</p>
+</body>
+</html>`);
 });
 
 export { app as AuthHandler };
