@@ -19,6 +19,27 @@ interface Env {
 const PUBLIC_PUBLISHER_URL =
   "https://palm-beach-times-publisher.steven-a00.workers.dev";
 
+const MASTHEAD_OVERRIDE = `<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=UnifrakturCook:wght@700&display=swap" rel="stylesheet">
+<style id="pbt-masthead-override">
+.nameplate{margin-top:3px!important;margin-bottom:1px!important;text-align:center!important}
+.nameplate .the{display:none!important}
+.nameplate h1{
+  margin:0!important;
+  font-family:'UnifrakturCook','Old English Text MT','Goudy Text MT','Blackletter','Times New Roman',serif!important;
+  font-weight:700!important;
+  font-size:clamp(2.85rem,5.25vw,5.2rem)!important;
+  line-height:.93!important;
+  letter-spacing:-.015em!important;
+  text-transform:none!important;
+  white-space:nowrap!important;
+}
+@media(max-width:720px){
+  .nameplate h1{font-size:clamp(2.15rem,11vw,3.25rem)!important;white-space:normal!important}
+}
+</style>`;
+
 function textResult(text: string, isError = false) {
   return {
     content: [{ type: "text" as const, text }],
@@ -59,6 +80,28 @@ function publisherRequest(env: Env, path: string, init?: RequestInit) {
   );
 }
 
+function applyPalmBeachTimesMasthead(html: string): string {
+  let updated = html
+    .replace(
+      /<div\s+class=["']the["']>\s*THE\s*<\/div>\s*(<h1[^>]*>)\s*(?:THE\s+)?PALM BEACH TIMES\s*(<\/h1>)/i,
+      "$1The Palm Beach Times$2"
+    )
+    .replace(
+      /(<h1[^>]*>)\s*THE\s+PALM\s+BEACH\s+TIMES\s*(<\/h1>)/i,
+      "$1The Palm Beach Times$2"
+    );
+
+  if (updated.includes('id="pbt-masthead-override"')) {
+    return updated;
+  }
+
+  if (/<\/head>/i.test(updated)) {
+    return updated.replace(/<\/head>/i, `${MASTHEAD_OVERRIDE}\n</head>`);
+  }
+
+  return `${MASTHEAD_OVERRIDE}\n${updated}`;
+}
+
 const optionalDate = z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
   z
@@ -70,14 +113,14 @@ const optionalDate = z.preprocess(
 function createServer(env: Env) {
   const server = new McpServer({
     name: "Palm Beach Times Publisher",
-    version: "2.0.0"
+    version: "2.1.0"
   });
 
   server.registerTool(
     "publish_newspaper",
     {
       description:
-        "Publish a completed Palm Beach Times HTML edition and return browser URLs for the dated edition and /today.",
+        "Publish a completed Palm Beach Times HTML edition and return browser URLs for the dated edition and /today. The publisher automatically applies the classic Palm Beach Times blackletter masthead treatment.",
       inputSchema: {
         date: z
           .string()
@@ -93,6 +136,7 @@ function createServer(env: Env) {
       try {
         requireAuthorizedUser(env);
         const publishToken = requirePublishToken(env);
+        const publishedHtml = applyPalmBeachTimesMasthead(html);
 
         const response = await publisherRequest(env, "/api/publish", {
           method: "POST",
@@ -102,7 +146,7 @@ function createServer(env: Env) {
           },
           body: JSON.stringify({
             date,
-            html,
+            html: publishedHtml,
             title,
             editionType
           })
@@ -131,6 +175,7 @@ function createServer(env: Env) {
               date: result.date ?? date,
               title: result.title ?? title,
               editionType: result.editionType ?? editionType,
+              mastheadStyle: "classic-blackletter",
               url: `${PUBLIC_PUBLISHER_URL}/${date}`,
               todayUrl: `${PUBLIC_PUBLISHER_URL}/today`
             },
