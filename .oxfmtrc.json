@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "trailingComma": "none",
+  "printWidth": 80,
+  "experimentalSortPackageJson": false,
+  "ignorePatterns": [
+    "packages/agents/CHANGELOG.md",
+    "packages/channels/live-tests/snapshots",
+    "site/agents/.astro",
+    "**/routeTree.gen.ts",
+    "**/think.d.ts"
+  ]
+}
