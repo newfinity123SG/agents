@@ -1,92 +1,217 @@
-import { McpServer } from "@modelcontextprotocol/server";
-import { createMcpHandler, getMcpAuthContext } from "agents/mcp/server";
-import { z } from "zod";
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
+import { McpServer } from "@modelcontextprotocol/server";
+import {
+  createMcpHandler,
+  getMcpAuthContext
+} from "../../../packages/agents/src/mcp/server/index";
+import { z } from "zod";
 import { AuthHandler } from "./auth-handler";
 
-function createServer() {
+interface Env {
+  PUBLISHER: Fetcher;
+  PUBLISH_TOKEN?: string;
+  GITHUB_CLIENT_ID?: string;
+  GITHUB_CLIENT_SECRET?: string;
+  ALLOWED_GITHUB_LOGIN?: string;
+  OAUTH_KV: KVNamespace;
+}
+
+const PUBLIC_PUBLISHER_URL =
+  "https://palm-beach-times-publisher.steven-a00.workers.dev";
+
+function textResult(text: string, isError = false) {
+  return {
+    content: [{ type: "text" as const, text }],
+    ...(isError ? { isError: true } : {})
+  };
+}
+
+function requirePublishToken(env: Env): string {
+  if (!env.PUBLISH_TOKEN) {
+    throw new Error("PUBLISH_TOKEN is not configured");
+  }
+  return env.PUBLISH_TOKEN;
+}
+
+function requireAuthorizedUser(env: Env): string {
+  const allowed = env.ALLOWED_GITHUB_LOGIN;
+  if (!allowed) {
+    throw new Error("ALLOWED_GITHUB_LOGIN is not configured");
+  }
+
+  const auth = getMcpAuthContext();
+  const login = auth?.props?.githubLogin;
+
+  if (typeof login !== "string") {
+    throw new Error("No authenticated GitHub identity is available");
+  }
+
+  if (login.toLowerCase() !== allowed.toLowerCase()) {
+    throw new Error("Authenticated GitHub account is not authorized");
+  }
+
+  return login;
+}
+
+function publisherRequest(env: Env, path: string, init?: RequestInit) {
+  return env.PUBLISHER.fetch(
+    new Request(`https://publisher.internal${path}`, init)
+  );
+}
+
+const optionalDate = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD format")
+    .optional()
+);
+
+function createServer(env: Env) {
   const server = new McpServer({
-    name: "Authenticated MCP Server",
-    version: "1.0.0"
+    name: "Palm Beach Times Publisher",
+    version: "2.0.0"
   });
 
   server.registerTool(
-    "hello",
+    "publish_newspaper",
     {
-      description: "Returns a greeting message",
-      inputSchema: { name: z.string().optional() }
+      description:
+        "Publish a completed Palm Beach Times HTML edition and return browser URLs for the dated edition and /today.",
+      inputSchema: {
+        date: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD format"),
+        html: z.string().min(1),
+        title: z.string().default("The Palm Beach Times"),
+        editionType: z
+          .enum(["weekday", "friday-weekend", "weekend"])
+          .default("weekday")
+      }
     },
-    async ({ name }) => {
-      const auth = getMcpAuthContext();
-      const username = auth?.props?.username as string | undefined;
+    async ({ date, html, title, editionType }) => {
+      try {
+        requireAuthorizedUser(env);
+        const publishToken = requirePublishToken(env);
 
-      return {
-        content: [
-          {
-            text: `Hello, ${name ?? username ?? "World"}!`,
-            type: "text"
-          }
-        ]
-      };
+        const response = await publisherRequest(env, "/api/publish", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${publishToken}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            date,
+            html,
+            title,
+            editionType
+          })
+        });
+
+        const body = await response.text();
+        if (!response.ok) {
+          return textResult(
+            `Publishing failed with HTTP ${response.status}: ${body}`,
+            true
+          );
+        }
+
+        let result: Record<string, unknown> = {};
+        try {
+          result = JSON.parse(body) as Record<string, unknown>;
+        } catch {
+          // Public URLs are synthesized below because the service binding
+          // invokes the publisher using an internal hostname.
+        }
+
+        return textResult(
+          JSON.stringify(
+            {
+              ok: true,
+              date: result.date ?? date,
+              title: result.title ?? title,
+              editionType: result.editionType ?? editionType,
+              url: `${PUBLIC_PUBLISHER_URL}/${date}`,
+              todayUrl: `${PUBLIC_PUBLISHER_URL}/today`
+            },
+            null,
+            2
+          )
+        );
+      } catch (error) {
+        return textResult(
+          error instanceof Error ? error.message : "Unknown publishing error",
+          true
+        );
+      }
     }
   );
 
   server.registerTool(
-    "whoami",
+    "get_newspaper",
     {
-      description: "Returns information about the authenticated user"
-    },
-    async (context) => {
-      const auth = getMcpAuthContext();
-
-      if (!auth) {
-        return {
-          content: [
-            {
-              text: "No authentication context available",
-              type: "text"
-            }
-          ]
-        };
+      description:
+        "Return the browser URL and availability status for today's Palm Beach Times or a specific dated edition.",
+      inputSchema: {
+        date: optionalDate
       }
+    },
+    async ({ date }) => {
+      try {
+        requireAuthorizedUser(env);
 
-      return {
-        content: [
-          {
-            text: JSON.stringify(
-              {
-                userId: auth.props?.userId,
-                username: auth.props?.username,
-                email: auth.props?.email,
-                clientId: context.http?.authInfo?.clientId,
-                scopes: context.http?.authInfo?.scopes
-              },
-              null,
-              2
-            ),
-            type: "text"
-          }
-        ]
-      };
+        const path = date ? `/${date}` : "/today";
+        const response = await publisherRequest(env, path, {
+          method: "GET",
+          redirect: "manual"
+        });
+
+        if (response.body) {
+          await response.body.cancel();
+        }
+
+        return textResult(
+          JSON.stringify(
+            {
+              ok: response.ok,
+              status: response.status,
+              date: date ?? "today",
+              url: date
+                ? `${PUBLIC_PUBLISHER_URL}/${date}`
+                : `${PUBLIC_PUBLISHER_URL}/today`
+            },
+            null,
+            2
+          ),
+          !response.ok
+        );
+      } catch (error) {
+        return textResult(
+          error instanceof Error ? error.message : "Unknown lookup error",
+          true
+        );
+      }
     }
   );
 
   return server;
 }
 
-const apiHandler = createMcpHandler(createServer);
+const apiHandler = {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    return createMcpHandler(() => createServer(env))(request, env, ctx);
+  }
+};
 
-export default new OAuthProvider({
+export default new OAuthProvider<Env>({
   authorizeEndpoint: "/authorize",
   tokenEndpoint: "/oauth/token",
   clientRegistrationEndpoint: "/oauth/register",
-
   apiRoute: "/mcp",
-  apiHandler: apiHandler,
-
+  apiHandler,
   defaultHandler: {
-    async fetch(request: Request, env: unknown, ctx: ExecutionContext) {
-      return AuthHandler.fetch(request, env as Record<string, unknown>, ctx);
+    async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+      return AuthHandler.fetch(request, env as Env & Record<string, unknown>, ctx);
     }
   }
 });
