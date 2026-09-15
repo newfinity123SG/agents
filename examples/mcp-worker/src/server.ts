@@ -7,19 +7,21 @@ interface Env {
   PUBLISH_TOKEN?: string;
 }
 
-function requireConfig(env: Env) {
-  const publisherUrl = env.PUBLISHER_URL?.replace(/\/+$/, "");
-  const publishToken = env.PUBLISH_TOKEN;
+const DEFAULT_PUBLISHER_URL =
+  "https://palm-beach-times-publisher.steven-a00.workers.dev";
 
-  if (!publisherUrl) {
-    throw new Error("PUBLISHER_URL is not configured");
-  }
+function getPublisherUrl(env: Env) {
+  return (env.PUBLISHER_URL || DEFAULT_PUBLISHER_URL).replace(/\/+$/, "");
+}
+
+function requirePublishToken(env: Env) {
+  const publishToken = env.PUBLISH_TOKEN;
 
   if (!publishToken) {
     throw new Error("PUBLISH_TOKEN is not configured");
   }
 
-  return { publisherUrl, publishToken };
+  return publishToken;
 }
 
 function textResult(text: string, isError = false) {
@@ -32,7 +34,7 @@ function textResult(text: string, isError = false) {
 function createServer(env: Env) {
   const server = new McpServer({
     name: "Palm Beach Times Publisher",
-    version: "1.0.0"
+    version: "1.0.1"
   });
 
   server.registerTool(
@@ -53,7 +55,8 @@ function createServer(env: Env) {
     },
     async ({ date, html, title, editionType }) => {
       try {
-        const { publisherUrl, publishToken } = requireConfig(env);
+        const publisherUrl = getPublisherUrl(env);
+        const publishToken = requirePublishToken(env);
 
         const response = await fetch(`${publisherUrl}/api/publish`, {
           method: "POST",
@@ -125,7 +128,7 @@ function createServer(env: Env) {
     },
     async ({ date }) => {
       try {
-        const { publisherUrl } = requireConfig(env);
+        const publisherUrl = getPublisherUrl(env);
         const editionUrl = date
           ? `${publisherUrl}/${date}`
           : `${publisherUrl}/today`;
