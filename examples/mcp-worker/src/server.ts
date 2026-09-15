@@ -36,7 +36,7 @@ function publisherRequest(env: Env, path: string, init?: RequestInit) {
 function createServer(env: Env) {
   const server = new McpServer({
     name: "Palm Beach Times Publisher",
-    version: "1.1.0"
+    version: "1.1.1"
   });
 
   server.registerTool(
@@ -117,17 +117,20 @@ function createServer(env: Env) {
     "get_newspaper",
     {
       description:
-        "Return the browser URL and availability status for today's Palm Beach Times or a specific dated edition.",
+        "Return the browser URL and availability status for today's Palm Beach Times or a specific dated edition. Leave date blank to get today's edition.",
       inputSchema: {
         date: z
-          .string()
-          .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD format")
+          .union([
+            z.literal(""),
+            z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD format")
+          ])
           .optional()
       }
     },
     async ({ date }) => {
       try {
-        const path = date ? `/${date}` : "/today";
+        const normalizedDate = date?.trim() || undefined;
+        const path = normalizedDate ? `/${normalizedDate}` : "/today";
         const response = await publisherRequest(env, path, {
           method: "GET",
           redirect: "manual"
@@ -142,9 +145,9 @@ function createServer(env: Env) {
             {
               ok: response.ok,
               status: response.status,
-              date: date ?? "today",
-              url: date
-                ? `${PUBLIC_PUBLISHER_URL}/${date}`
+              date: normalizedDate ?? "today",
+              url: normalizedDate
+                ? `${PUBLIC_PUBLISHER_URL}/${normalizedDate}`
                 : `${PUBLIC_PUBLISHER_URL}/today`
             },
             null,
