@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/server";
-import { createMcpHandler } from "agents/mcp/server";
+import { createMcpHandler } from "../../../packages/agents/src/mcp/server/index";
 import { z } from "zod";
 
 function createServer() {
