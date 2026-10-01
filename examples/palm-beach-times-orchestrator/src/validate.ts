@@ -33,6 +33,11 @@ export function validateEditionHtml(html: string) {
   const volumeBars = (html.match(/class="market-volume-bar"/g) ?? []).length;
   if (volumeBars < 144) errors.push(`market_volume_bars_${volumeBars}`);
 
+  if (!/data-comic-source="generated-image"/i.test(html) ||
+      !/class="comic-image"[^>]*src="data:image\/(?:png|jpeg|webp);base64,[^"]{10000,}"/i.test(html)) {
+    errors.push("comic_not_embedded");
+  }
+
   const screen =
     html.match(/<section class="feature" id="screen-guide">([\s\S]*?)<\/section>/i)?.[1] ?? "";
   if ((screen.match(/class="story"/g) ?? []).length < 3) {
