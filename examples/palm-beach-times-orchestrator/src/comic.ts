@@ -29,7 +29,8 @@ export async function buildComic(env: ComicEnv, date: string, todaysThread: stri
     "Use three clearly separated horizontal panels with short, phone-readable dialogue.",
     "Keep the humor benign, observational, and rooted in South Florida life.",
     "Do not depict a real private person. Do not imitate a named artist, existing comic strip, or copyrighted character.",
-    "Do not place the Palm Beach Times logo inside the comic art.",
+    "The image itself must contain ONLY the three comic panels. No newspaper masthead, no publication title, no date banner, no page header, no footer, and no Palm Beach Times logo inside the art.",
+    "Compose the three panels as a wide horizontal strip with minimal top and bottom margin so it reads compactly inside a newspaper page.",
   ].join("\n");
 
   const response = await fetch("https://api.openai.com/v1/images/generations", {
