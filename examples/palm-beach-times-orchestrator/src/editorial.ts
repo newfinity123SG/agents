@@ -87,6 +87,8 @@ Rules:
 - Weather/Ocean must be centered on Boca Raton first. Mention Delray Beach or West Palm Beach only for meaningful differences.
 - Copy supported structured weatherOcean values from the research plan into weatherOcean.stats/alerts/tides/waterTemp/surf/ripCurrentRisk/beachVerdict. Do not collapse the weather desk into one paragraph when structured data exists.
 - Use the prior newspaper-style density: weather ledger first, then a concise Best window/Watch out item, then tides/beach verdict.
+- Keep Weather & Ocean compact. Do not repeat the same alert in the summary, alert bullets, and notes.
+- Never expose internal/source-quality caveats as standalone reader-facing notes. Omit unsupported fields instead.
 - Prefer Boca and Delray in Around Town when relevant candidates exist.
 - Use 2 Money stories when supported, not one merely because the first candidate was acceptable.
 - Use 2-4 Local News stories when supported; do not prematurely stop at 2 if the research pool has more consequential Palm Beach County items.
