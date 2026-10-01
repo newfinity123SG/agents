@@ -63,9 +63,13 @@ Rules:
 - Local priority: Boca Raton, Delray Beach, West Palm Beach, Palm Beach County.
 - Exactly four Morning in 60 Seconds briefs.
 - Keep every secondary summary under 45 words.
-- If a desk has no supported item, return an empty array.
+- Use the supplied candidate pool aggressively enough to make a complete edition: target 2-3 Around Town items, 1-2 Development items, 2-4 Local News items, 1-2 Community Issues items, 1-2 Technology items, 1-2 World/Lifestyle items, and at least 3 Screen Guide selections when supported.
+- Only return an empty array when the research plan truly contains no suitable supported item for that desk.
 - Do not turn thin evidence into certainty.
 - Preserve source URLs exactly as supplied.
+- Weather/Ocean must be centered on Boca Raton first. Mention Delray Beach or West Palm Beach only for meaningful differences.
+- Screen Guide should favor newly arriving/current releases with confirmed dates and should not be left empty if the research plan contains supported release candidates.
+- Do not use generic Quiet-this-morning filler when a relevant candidate exists elsewhere in the supplied pool.
 `;
 
   const response = await fetch("https://api.openai.com/v1/responses", {
