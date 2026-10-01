@@ -86,7 +86,7 @@ async function verifyOpenAI(env: Env) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "gpt-5.6-luna",
+      model: "gpt-6-luna",
       input: "Reply with exactly: PBT_OPENAI_OK",
       max_output_tokens: 24,
     }),
@@ -117,7 +117,7 @@ async function verifyOpenAI(env: Env) {
     throw new Error("openai_unexpected_response");
   }
 
-  return { ok: true, model: "gpt-5.6-luna" };
+  return { ok: true, model: "gpt-6-luna" };
 }
 
 async function sendSlackTest(env: Env) {
