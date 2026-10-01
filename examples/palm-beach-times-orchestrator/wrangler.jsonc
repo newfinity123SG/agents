@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "palm-beach-times-orchestrator",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "services": [
+    {
+      "binding": "PUBLISHER",
+      "service": "palm-beach-times-publisher"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
