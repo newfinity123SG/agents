@@ -1,10 +1,12 @@
 import { NEWSPAPER_TEMPLATE } from "./template";
-import { MASTHEAD_DATA_URI } from "./masthead-data";
 import { buildEditorialPlan } from "./editorial";
 import { runResearchDryRun } from "./research";
+import { loadLockedMasthead } from "./assets";
+import { buildMarketCharts } from "./market";
 
 interface PreviewEnv {
   OPENAI_API_KEY: string;
+  PUBLISHER: Fetcher;
 }
 
 function esc(value: unknown) {
@@ -64,14 +66,10 @@ export async function buildPreviewEdition(env: PreviewEnv) {
   const briefs = (editorial.morningBriefs ?? []).slice(0, 4);
   while (briefs.length < 4) briefs.push("No additional verified brief selected.");
 
-  const marketPreview = `
-    <div class="market-glance" data-preview-only="true">
-      <div class="market-glance-head">
-        <span class="market-glance-title">Markets at a Glance</span>
-        <span class="market-glance-period">Preview only</span>
-      </div>
-      <p class="quiet">Live S&amp;P 500, Dow and Nasdaq intraday charts are intentionally withheld from this preview until the dedicated market-data adapter is connected. No fabricated market series.</p>
-    </div>`;
+  const [mastheadLogo, marketPreview] = await Promise.all([
+    loadLockedMasthead(env),
+    buildMarketCharts(),
+  ]);
 
   const comicPreview = `
     <h2>The Morning Strip</h2>
@@ -85,13 +83,13 @@ export async function buildPreviewEdition(env: PreviewEnv) {
     REGION_LABEL: "Boca · Delray · West Palm · Palm Beach County",
     DATE: esc(research.date),
     DESK_LABEL: "Preview Build",
-    MASTHEAD_LOGO: `<img class="masthead-logo" src="${MASTHEAD_DATA_URI}" alt="The Palm Beach Times">`,
+    MASTHEAD_LOGO: mastheadLogo,
     DECK: "Local people. Brighter days.",
     CONTENTS_LINKS: '<a href="#front-page">Front Page</a><a href="#local">Local</a><a href="#money">Money</a><a href="#technology">Technology</a><a href="#lifestyle">Lifestyle</a><a href="#comic">Comic</a>',
     TODAYS_THREAD: `<p>${esc(editorial.todaysThread ?? "")}</p>`,
     FRONT_PAGE: `<span class="kicker">Front Page</span><h2>${esc(front.headline ?? "Morning Briefing")}</h2><p>${esc(front.summary ?? "")}</p>${front.sourceName ? `<span class="source">${esc(front.sourceName)}</span>` : ""}${safeUrl(front.sourceUrl) ? `<a class="read" href="${safeUrl(front.sourceUrl)}" target="_blank" rel="noopener">Read full story →</a>` : ""}`,
     MORNING_BRIEFS: `<h2>Morning in 60 Seconds</h2><ol class="brief-list">${briefs.map((b: string) => `<li>${esc(b)}</li>`).join("")}</ol>`,
-    WEATHER_OCEAN_DESK: `<h2>Weather &amp; Ocean</h2><p>${esc(editorial.weatherOcean?.summary ?? "Weather and ocean detail will be expanded from verified official sources in production.")}</p><ul class="brief-list">${(editorial.weatherOcean?.notes ?? []).map((n: string) => `<li>${esc(n)}</li>`).join("")}</ul>`,
+    WEATHER_OCEAN_DESK: `<h2>Weather &amp; Ocean</h2><p>${esc(editorial.weatherOcean?.summary ?? "Boca Raton weather and ocean detail unavailable from verified sources.")}</p><ul class="brief-list">${(editorial.weatherOcean?.notes ?? []).map((n: string) => `<li>${esc(n)}</li>`).join("")}</ul>`,
     MARKET_CHARTS: marketPreview,
     MONEY_DESK: storyDesk("Money", editorial.money ?? []),
     AROUND_TOWN_DESK: storyDesk("Around Town", editorial.aroundTown ?? []),
@@ -114,8 +112,9 @@ export async function buildPreviewEdition(env: PreviewEnv) {
     notes: [
       "Preview only: no publisher call",
       "Preview only: no Slack delivery",
-      "Market charts intentionally blocked until verified intraday adapter is connected",
-      "Comic image generation intentionally blocked until image generation stage is connected",
+      "Locked graphical masthead loaded from the last valid published edition",
+      "Live 1-day S&P 500, Dow and Nasdaq charts enabled with aligned ETF volume proxies",
+      "Comic image generation remains the final production-only asset stage",
     ],
   };
 }
