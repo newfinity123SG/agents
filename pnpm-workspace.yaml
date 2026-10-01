@@ -1,6 +1,7 @@
 packages:
   - "agent-think"
   - "examples/*"
+  - "!examples/palm-beach-times-orchestrator"
   - "!examples/next"
   - "examples/next/*"
   - "!examples/next/harnesses"
