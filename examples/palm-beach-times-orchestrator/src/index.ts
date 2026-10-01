@@ -1,3 +1,4 @@
+import { buildPreviewEdition } from "./preview";
 import { runResearchDryRun } from "./research";
 
 interface Env {
@@ -250,6 +251,27 @@ export default {
       try {
         logStage("research_started", "manual dry-run research");
         const result = await runResearchDryRun(env);
+        return json(result);
+      } catch (error) {
+        logStage(
+          "failed",
+          error instanceof Error ? error.message : String(error),
+        );
+        return json(
+          {
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          500,
+        );
+      }
+    }
+
+    if (request.method === "POST" && url.pathname === "/preview-edition") {
+      try {
+        logStage("html_built", "manual preview build started");
+        const result = await buildPreviewEdition(env);
+        logStage("validation_passed", "preview HTML assembled", result.date);
         return json(result);
       } catch (error) {
         logStage(
