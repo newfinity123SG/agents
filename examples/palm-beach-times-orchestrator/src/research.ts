@@ -26,6 +26,68 @@ function extractOutputText(parsed: any) {
   return parts.join("\n").trim();
 }
 
+function parseModelJson(text: string) {
+  const trimmed = text.trim();
+
+  const attempts = [
+    trimmed,
+    trimmed.replace(/^\`\`\`(?:json)?\s*/i, "").replace(/\s*\`\`\`$/i, ""),
+  ];
+
+  for (const candidate of attempts) {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // Continue to balanced-object recovery below.
+    }
+  }
+
+  const start = trimmed.indexOf("{");
+  if (start < 0) {
+    throw new Error(`research_output_missing_json_object: ${trimmed.slice(0, 500)}`);
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < trimmed.length; i += 1) {
+    const ch = trimmed[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (ch === "{") depth += 1;
+    if (ch === "}") {
+      depth -= 1;
+
+      if (depth === 0) {
+        const candidate = trimmed.slice(start, i + 1);
+        try {
+          return JSON.parse(candidate);
+        } catch {
+          break;
+        }
+      }
+    }
+  }
+
+  throw new Error(`research_output_not_json: ${trimmed.slice(0, 500)}`);
+}
+
 export async function runResearchDryRun(env: ResearchEnv) {
   const { date, editionType } = localDateParts();
 
@@ -101,12 +163,7 @@ Requirements:
   const output = extractOutputText(parsed);
   if (!output) throw new Error("research_openai_empty_output");
 
-  let plan: any;
-  try {
-    plan = JSON.parse(output);
-  } catch {
-    throw new Error(`research_output_not_json: ${output.slice(0, 500)}`);
-  }
+  const plan = parseModelJson(output);
 
   return {
     ok: true,
