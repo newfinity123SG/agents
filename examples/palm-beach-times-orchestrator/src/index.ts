@@ -1,3 +1,5 @@
+import { runResearchDryRun } from "./research";
+
 interface Env {
   OPENAI_API_KEY: string;
   SLACK_WEBHOOK_URL: string;
@@ -234,6 +236,26 @@ export default {
       try {
         return json(await sendSlackTest(env));
       } catch (error) {
+        return json(
+          {
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          500,
+        );
+      }
+    }
+
+    if (request.method === "POST" && url.pathname === "/dry-run-research") {
+      try {
+        logStage("research_started", "manual dry-run research");
+        const result = await runResearchDryRun(env);
+        return json(result);
+      } catch (error) {
+        logStage(
+          "failed",
+          error instanceof Error ? error.message : String(error),
+        );
         return json(
           {
             ok: false,
