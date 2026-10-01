@@ -115,6 +115,22 @@ Required JSON shape:
   "technologyCandidates": [],
   "worldLifestyleCandidates": [],
   "screenGuideCandidates": [],
+  "weatherOcean": {
+    "currentConditions": "",
+    "highLow": "",
+    "rain": "",
+    "wind": "",
+    "humidityDewPoint": "",
+    "sunriseSunset": "",
+    "alerts": [],
+    "tides": "",
+    "waterTemp": "",
+    "surf": "",
+    "ripCurrentRisk": "",
+    "beachVerdict": "",
+    "sourceUrl": "",
+    "sourceName": ""
+  },
   "weatherOceanNotes": [],
   "duplicateRisks": [],
   "editorNotes": []
@@ -129,8 +145,14 @@ Requirements:
 - At least 16 candidates should be Boca/Delray/West Palm/Palm Beach County specific when enough meaningful fresh material exists.
 - Keep each headline under 120 characters.
 - Keep each whyItMatters under 180 characters.
-- Weather/ocean research must be centered on Boca Raton first, with Delray Beach and West Palm Beach differences only when meaningful. Prefer NWS/NOAA/NDBC or other official sources and include source URLs in the note text when available.
+- Weather/ocean research must be centered on Boca Raton first, with Delray Beach and West Palm Beach differences only when meaningful.
+- Populate the structured weatherOcean object with verified current conditions, high/low, rain chance, wind, humidity/dew point when available, sunrise/sunset, active alerts, Lake Worth/Boca-relevant tides, water temperature, surf, rip-current risk, and a short beachVerdict when supported.
+- Prefer NWS/NOAA/NDBC/NOAA Tides & Currents and official local sources. Put the primary official source in weatherOcean.sourceUrl/sourceName. Do not put raw URLs inside weatherOceanNotes.
 - Deliberately research each local desk separately: Around Town, Development & Deals, Palm Beach County & South Florida News, and Community Issues.
+- Around Town should deliberately look for Boca and Delray events, openings, restaurants, markets, parks and useful same-day happenings before filling with West Palm.
+- Money should deliberately research mortgage, housing, rates, lenders and Palm Beach County business in addition to general markets.
+- Local News should target at least 4 viable candidates so the final desk can usually carry 2-4 strong items.
+- Quick Extras should have at least 3 viable leftover candidates whenever the morning cycle supports them.
 - Deliberately research Screen Guide releases across Netflix, Hulu, Max, Prime Video, Apple TV+, Disney+, Peacock, Paramount+, major networks, and current theatrical releases. Include enough confirmed current releases for at least 3 final Screen Guide selections.
 - Deliberately research Technology & Community and World & Lifestyle so those desks are not left empty merely because the first search pass was local.
 - Keep weather/ocean notes and editor notes extremely concise.
