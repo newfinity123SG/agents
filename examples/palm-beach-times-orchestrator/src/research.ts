@@ -125,10 +125,14 @@ Requirements:
 - Prefer primary/official sources where practical.
 - Include direct source URLs.
 - Do not invent dates, facts, or links.
-- Keep this dry-run candidate pool between 14 and 20 items total.
-- At least 7 candidates should be Boca/Delray/West Palm/Palm Beach County specific when enough meaningful fresh material exists.
+- Keep this dry-run candidate pool between 30 and 45 items total so the final edition has enough verified material to fill the desks without filler.
+- At least 16 candidates should be Boca/Delray/West Palm/Palm Beach County specific when enough meaningful fresh material exists.
 - Keep each headline under 120 characters.
 - Keep each whyItMatters under 180 characters.
+- Weather/ocean research must be centered on Boca Raton first, with Delray Beach and West Palm Beach differences only when meaningful. Prefer NWS/NOAA/NDBC or other official sources and include source URLs in the note text when available.
+- Deliberately research each local desk separately: Around Town, Development & Deals, Palm Beach County & South Florida News, and Community Issues.
+- Deliberately research Screen Guide releases across Netflix, Hulu, Max, Prime Video, Apple TV+, Disney+, Peacock, Paramount+, major networks, and current theatrical releases. Include enough confirmed current releases for at least 3 final Screen Guide selections.
+- Deliberately research Technology & Community and World & Lifestyle so those desks are not left empty merely because the first search pass was local.
 - Keep weather/ocean notes and editor notes extremely concise.
 - One event/entity may appear only once as a full candidate.
 - Screen Guide items must have confirmed release/premiere dates where available.
