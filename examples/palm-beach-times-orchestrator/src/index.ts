@@ -78,6 +78,67 @@ async function verifyPublisher(env: Env) {
   return response.json();
 }
 
+async function verifyOpenAI(env: Env) {
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "gpt-5.6-luna",
+      input: "Reply with exactly: PBT_OPENAI_OK",
+      max_output_tokens: 24,
+    }),
+  });
+
+  const body = await response.text();
+
+  if (!response.ok) {
+    throw new Error(`openai_http_${response.status}: ${body.slice(0, 500)}`);
+  }
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    throw new Error("openai_invalid_json");
+  }
+
+  const outputText =
+    parsed.output_text ??
+    parsed.output
+      ?.flatMap((item: any) => item.content ?? [])
+      ?.find((part: any) => part.type === "output_text")
+      ?.text ??
+    "";
+
+  if (!String(outputText).includes("PBT_OPENAI_OK")) {
+    throw new Error("openai_unexpected_response");
+  }
+
+  return { ok: true, model: "gpt-5.6-luna" };
+}
+
+async function sendSlackTest(env: Env) {
+  const text =
+    "✅ Palm Beach Times delivery test — Cloudflare orchestrator is connected to #personal-flo.";
+
+  const response = await fetch(env.SLACK_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+
+  const body = await response.text();
+
+  if (!response.ok || body.trim().toLowerCase() !== "ok") {
+    throw new Error(`slack_http_${response.status}: ${body.slice(0, 500)}`);
+  }
+
+  return { ok: true };
+}
+
 async function runSkeleton(env: Env, source: "manual" | "scheduled") {
   const now = new Date();
   const date = new Intl.DateTimeFormat("en-CA", {
@@ -149,6 +210,34 @@ export default {
             ok: false,
             error: error instanceof Error ? error.message : String(error),
             status: lastStatus,
+          },
+          500,
+        );
+      }
+    }
+
+    if (request.method === "POST" && url.pathname === "/test-openai") {
+      try {
+        return json(await verifyOpenAI(env));
+      } catch (error) {
+        return json(
+          {
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          500,
+        );
+      }
+    }
+
+    if (request.method === "POST" && url.pathname === "/test-slack") {
+      try {
+        return json(await sendSlackTest(env));
+      } catch (error) {
+        return json(
+          {
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
           },
           500,
         );
