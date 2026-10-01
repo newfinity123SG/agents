@@ -78,7 +78,7 @@ a{color:var(--accent);text-underline-offset:2px}
 .feature-row{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(300px,.7fr);gap:24px;margin-bottom:18px}
 .feature{padding-top:3px}.feature + .feature{border-left:1px solid var(--rule-soft);padding-left:24px}
 .feature h2{font-size:1.3rem;text-transform:uppercase;margin:0 0 8px;padding-bottom:5px;border-bottom:2px solid var(--rule)}
-.comic-wrap{background:rgba(255,250,238,.28);padding:6px;border:1px solid rgba(59,48,36,.30);overflow:hidden}.comic-wrap img.comic-image{width:190%;max-width:none;height:auto;display:block;margin-left:-45%;border:1px solid rgba(59,48,36,.55);object-fit:contain}
+.comic-wrap{background:rgba(255,250,238,.28);padding:6px;border:1px solid rgba(59,48,36,.30);overflow:hidden}.comic-wrap img.comic-image{width:100%;max-width:100%;height:auto;display:block;margin:0 auto;border:1px solid rgba(59,48,36,.55);object-fit:contain}
 .caption{font-size:.68rem;color:var(--muted);font-style:italic}
 
 .quick-strip{border-top:3px double var(--rule);padding-top:10px}
