@@ -30,7 +30,7 @@ export async function buildComic(env: ComicEnv, date: string, todaysThread: stri
     "Keep the humor benign, observational, and rooted in South Florida life.",
     "Do not depict a real private person. Do not imitate a named artist, existing comic strip, or copyrighted character.",
     "The image itself must contain ONLY the three comic panels. No newspaper masthead, no publication title, no date banner, no page header, no footer, and no Palm Beach Times logo inside the art.",
-    "Compose the three panels as an extra-wide horizontal newspaper strip. Make the combined panels visually span the entire canvas from left edge to right edge with essentially no side gutters, no white outer frame, and almost no top or bottom margin. Keep all three panels horizontally elongated so the finished strip can be displayed wide without looking compressed. The comic art should occupy at least 97% of the canvas width and 92% of the canvas height.",
+    "Compose exactly three equal-width horizontal newspaper panels with the composition filling the entire image. Match a finished strip proportion of roughly 1400×600: wide and shallow, with panel borders running nearly edge-to-edge, almost no outer white margin, and no masthead or date banner inside the image.",
   ].join("\n");
 
   const response = await fetch("https://api.openai.com/v1/images/generations", {
