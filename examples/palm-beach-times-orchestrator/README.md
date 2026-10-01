@@ -27,3 +27,5 @@ Endpoints:
 - `POST /run-test`
 
 Cron is intentionally not configured yet. Enable scheduling only after the full manual production path passes.
+
+Deployment trigger: refreshed to force a new Cloudflare build from the orchestrator branch.
