@@ -146,8 +146,10 @@ Requirements:
 - Keep each headline under 120 characters.
 - Keep each whyItMatters under 180 characters.
 - Weather/ocean research must be centered on Boca Raton first, with Delray Beach and West Palm Beach differences only when meaningful.
-- Populate the structured weatherOcean object with verified current conditions, high/low, rain chance, wind, humidity/dew point when available, sunrise/sunset, active alerts, Lake Worth/Boca-relevant tides, water temperature, surf, rip-current risk, and a short beachVerdict when supported.
+- Populate the structured weatherOcean object with verified Boca Raton conditions/forecast, high/low, rain chance, wind, humidity/dew point when available, sunrise/sunset, active alerts, Lake Worth/Boca-relevant tides, water temperature, surf, rip-current risk, and a short beachVerdict when supported.
+- Do NOT use Pompano Beach Airpark or another distant station as Boca Raton's current-condition reading. If a precise Boca observation is unavailable, use the Boca point forecast wording instead of substituting another city's observation.
 - Prefer NWS/NOAA/NDBC/NOAA Tides & Currents and official local sources. Put the primary official source in weatherOcean.sourceUrl/sourceName. Do not put raw URLs inside weatherOceanNotes.
+- weatherOceanNotes should contain only useful reader-facing context. Do not include data-provenance caveats like 'this is not a Boca observation' or 'latest station-widget reading located' in the visible paper.
 - Deliberately research each local desk separately: Around Town, Development & Deals, Palm Beach County & South Florida News, and Community Issues.
 - Around Town should deliberately look for Boca and Delray events, openings, restaurants, markets, parks and useful same-day happenings before filling with West Palm.
 - Money should deliberately research mortgage, housing, rates, lenders and Palm Beach County business in addition to general markets.
