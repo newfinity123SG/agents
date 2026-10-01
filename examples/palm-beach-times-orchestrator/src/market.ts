@@ -62,7 +62,6 @@ async function chart(symbol: string) {
     `?interval=1m&period1=${period1}&period2=${period2}&includePrePost=false&events=div%2Csplits&_=${nonce}`;
 
   const response = await fetch(url, {
-    cache: "no-store",
     headers: {
       Accept: "application/json",
       "User-Agent": "PalmBeachTimes/1.0",
