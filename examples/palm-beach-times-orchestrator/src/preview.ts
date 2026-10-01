@@ -29,6 +29,13 @@ function safeUrl(value: unknown) {
   }
 }
 
+function cleanWeatherNote(value: unknown) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) return "";
+  return raw.replace(/https?:\/\/\S+/gi, "").replace(/\s{2,}/g, " ").trim();
+}
+
 function story(item: any) {
   if (!item?.headline) return "";
   const url = safeUrl(item.sourceUrl);
@@ -91,7 +98,7 @@ export async function buildPreviewEdition(env: PreviewEnv) {
     TODAYS_THREAD: `<p>${esc(editorial.todaysThread ?? "")}</p>`,
     FRONT_PAGE: `<span class="kicker">Front Page</span><h2>${esc(front.headline ?? "Morning Briefing")}</h2><p>${esc(front.summary ?? "")}</p>${front.sourceName ? `<span class="source">${esc(front.sourceName)}</span>` : ""}${safeUrl(front.sourceUrl) ? `<a class="read" href="${safeUrl(front.sourceUrl)}" target="_blank" rel="noopener">Read full story →</a>` : ""}`,
     MORNING_BRIEFS: `<h2>Morning in 60 Seconds</h2><ol class="brief-list">${briefs.map((b: string) => `<li>${esc(b)}</li>`).join("")}</ol>`,
-    WEATHER_OCEAN_DESK: `<h2>Weather &amp; Ocean</h2><p>${esc(editorial.weatherOcean?.summary ?? "Boca Raton weather and ocean detail unavailable from verified sources.")}</p><ul class="brief-list">${(editorial.weatherOcean?.notes ?? []).map((n: string) => `<li>${esc(n)}</li>`).join("")}</ul>`,
+    WEATHER_OCEAN_DESK: `<h2>Weather &amp; Ocean</h2><p>${esc(editorial.weatherOcean?.summary ?? "Boca Raton weather and ocean detail unavailable from verified sources.")}</p><ul class="brief-list">${(editorial.weatherOcean?.notes ?? []).map(cleanWeatherNote).filter(Boolean).map((n: string) => `<li>${esc(n)}</li>`).join("")}</ul>`,
     MARKET_CHARTS: marketPreview,
     MONEY_DESK: storyDesk("Money", editorial.money ?? []),
     AROUND_TOWN_DESK: storyDesk("Around Town", editorial.aroundTown ?? []),
