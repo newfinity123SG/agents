@@ -43,6 +43,22 @@ Return this exact JSON shape:
   "morningBriefs": ["...", "...", "...", "..."],
   "weatherOcean": {
     "summary": "...",
+    "stats": {
+      "now": "...",
+      "highLow": "...",
+      "rain": "...",
+      "wind": "...",
+      "humidity": "...",
+      "sun": "..."
+    },
+    "alerts": ["..."],
+    "tides": "...",
+    "waterTemp": "...",
+    "surf": "...",
+    "ripCurrentRisk": "...",
+    "beachVerdict": "...",
+    "sourceName": "...",
+    "sourceUrl": "...",
     "notes": ["..."]
   },
   "money": [
@@ -69,6 +85,11 @@ Rules:
 - Do not turn thin evidence into certainty.
 - Preserve source URLs exactly as supplied.
 - Weather/Ocean must be centered on Boca Raton first. Mention Delray Beach or West Palm Beach only for meaningful differences.
+- Copy supported structured weatherOcean values from the research plan into weatherOcean.stats/alerts/tides/waterTemp/surf/ripCurrentRisk/beachVerdict. Do not collapse the weather desk into one paragraph when structured data exists.
+- Use the prior newspaper-style density: weather ledger first, then a concise Best window/Watch out item, then tides/beach verdict.
+- Prefer Boca and Delray in Around Town when relevant candidates exist.
+- Use 2 Money stories when supported, not one merely because the first candidate was acceptable.
+- Use 2-4 Local News stories when supported; do not prematurely stop at 2 if the research pool has more consequential Palm Beach County items.
 - Screen Guide should favor newly arriving/current releases with confirmed dates and should not be left empty if the research plan contains supported release candidates. Each Screen Guide summary should lead with a compact status such as "Now Streaming · Netflix · Oct. 1", "Premieres Oct. 7 · Prime Video", or "In Theaters Oct. 2" when supported.
 - Do not use generic Quiet-this-morning filler when a relevant candidate exists elsewhere in the supplied pool.
 - Use 1-3 Quick Extras when verified leftover candidates remain after desk assignment. Keep them concise and do not duplicate a full story.
