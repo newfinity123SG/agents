@@ -4,6 +4,7 @@ import { runResearchDryRun } from "./research";
 import { loadLockedMasthead } from "./assets";
 import { buildMarketCharts } from "./market";
 import { buildComic } from "./comic";
+import { validateEditionHtml } from "./validate";
 
 interface PreviewEnv {
   OPENAI_API_KEY: string;
@@ -104,6 +105,8 @@ export async function buildPreviewEdition(env: PreviewEnv) {
     EXTRAS_TILE: `<h2>Quick Extras</h2><div class="extras-grid">${(editorial.quickExtras ?? []).map(story).join("") || '<p class="quiet">No additional verified items selected.</p>'}</div>`,
     FOOTER: '<span>The Palm Beach Times · Preview build</span><span>Not published · Not sent to Slack</span>',
   });
+
+  validateEditionHtml(html);
 
   return {
     ok: true,
