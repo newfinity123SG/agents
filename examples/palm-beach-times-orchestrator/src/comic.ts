@@ -31,8 +31,8 @@ export async function buildComic(env: ComicEnv, date: string, todaysThread: stri
     "The three panels MUST be side by side. NEVER stack panels vertically. NEVER use a two-row or three-row comic layout.",
     "Each panel should be a vertical rectangle separated by clear black comic-panel borders.",
     "Keep short, phone-readable dialogue inside each panel.",
-    "Create the strip so the complete artwork is visible without any cropping. Keep all speech balloons, faces, captions, panel borders and important action comfortably inside the image boundaries, especially away from the top edge.",
-    "Fill the image nearly edge-to-edge horizontally with the three panels, but leave a small safe margin around the full strip. Do not rely on top or bottom cropping.",
+    "Design for a WIDE newspaper display crop. Put ALL dialogue balloons, faces, panel borders, and important action inside the middle 50% of the canvas height. Treat the top 25% and bottom 25% as disposable background-only safety bands with no text, faces, hands, signs, or essential objects.",
+    "Make the three panels fill the full canvas width from left edge to right edge with almost no side margin. The visible comic must still read correctly if the top and bottom safety bands are cropped away."
     "Do not include a newspaper masthead, publication title, date banner, page header, footer, or Palm Beach Times logo inside the image.",
     "Keep the humor benign, observational, and rooted in South Florida life.",
     "Do not depict a real private person. Do not imitate a named artist, existing comic strip, or copyrighted character.",
