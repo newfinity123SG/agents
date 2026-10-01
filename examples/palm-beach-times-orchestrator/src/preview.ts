@@ -33,6 +33,9 @@ function cleanWeatherNote(value: unknown) {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
   if (/^https?:\/\//i.test(raw)) return "";
+  if (/not a boca raton (?:observation|reading)/i.test(raw)) return "";
+  if (/station-widget reading/i.test(raw)) return "";
+  if (/verify alerts before publication/i.test(raw)) return "";
   return raw.replace(/https?:\/\/\S+/gi, "").replace(/\s{2,}/g, " ").trim();
 }
 
