@@ -57,7 +57,7 @@ function parseModelJson(text: string) {
     if (inString) {
       if (escaped) {
         escaped = false;
-      } else if (ch === "\\\\") {
+      } else if (ch === "\\") {
         escaped = true;
       } else if (ch === '"') {
         inString = false;
@@ -125,11 +125,15 @@ Requirements:
 - Prefer primary/official sources where practical.
 - Include direct source URLs.
 - Do not invent dates, facts, or links.
-- Keep the total candidate pool between 18 and 28 items.
-- At least 8 candidates should be Boca/Delray/West Palm/Palm Beach County specific when enough meaningful fresh material exists.
+- Keep this dry-run candidate pool between 14 and 20 items total.
+- At least 7 candidates should be Boca/Delray/West Palm/Palm Beach County specific when enough meaningful fresh material exists.
+- Keep each headline under 120 characters.
+- Keep each whyItMatters under 180 characters.
+- Keep weather/ocean notes and editor notes extremely concise.
 - One event/entity may appear only once as a full candidate.
 - Screen Guide items must have confirmed release/premiere dates where available.
 - Do not include private user data.
+- Return the JSON immediately after research. Do not add commentary before or after it.
 `;
 
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -143,7 +147,7 @@ Requirements:
       tools: [{ type: "web_search" }],
       tool_choice: "required",
       input: prompt,
-      max_output_tokens: 7000,
+      max_output_tokens: 12000,
     }),
   });
 
@@ -158,6 +162,11 @@ Requirements:
     parsed = JSON.parse(body);
   } catch {
     throw new Error("research_openai_invalid_json");
+  }
+
+  if (parsed?.status === "incomplete") {
+    const reason = parsed?.incomplete_details?.reason ?? "unknown";
+    throw new Error(`research_openai_incomplete_${reason}`);
   }
 
   const output = extractOutputText(parsed);
