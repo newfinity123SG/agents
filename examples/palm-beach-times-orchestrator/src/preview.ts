@@ -3,6 +3,7 @@ import { buildEditorialPlan } from "./editorial";
 import { runResearchDryRun } from "./research";
 import { loadLockedMasthead } from "./assets";
 import { buildMarketCharts } from "./market";
+import { buildComic } from "./comic";
 
 interface PreviewEnv {
   OPENAI_API_KEY: string;
@@ -71,11 +72,11 @@ export async function buildPreviewEdition(env: PreviewEnv) {
     buildMarketCharts(),
   ]);
 
-  const comicPreview = `
-    <h2>The Morning Strip</h2>
-    <div class="comic-wrap" data-preview-only="true">
-      <p class="quiet">Comic placement verified. Daily image generation and embedding will be connected in the next production stage.</p>
-    </div>`;
+  const comicPreview = await buildComic(
+    env,
+    research.date,
+    editorial.todaysThread ?? "",
+  );
 
   const html = replaceAll(NEWSPAPER_TEMPLATE, {
     MASTHEAD: "The Palm Beach Times",
@@ -114,7 +115,7 @@ export async function buildPreviewEdition(env: PreviewEnv) {
       "Preview only: no Slack delivery",
       "Locked graphical masthead loaded from the last valid published edition",
       "Live 1-day S&P 500, Dow and Nasdaq charts enabled with aligned ETF volume proxies",
-      "Comic image generation remains the final production-only asset stage",
+      "Fresh generated Morning Strip is embedded directly in the HTML",
     ],
   };
 }
