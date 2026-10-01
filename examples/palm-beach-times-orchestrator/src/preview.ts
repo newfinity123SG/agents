@@ -47,6 +47,40 @@ function story(item: any) {
   </article>`;
 }
 
+function weatherDesk(data: any) {
+  const s = data?.stats ?? {};
+  const stats = [
+    ["Now", s.now],
+    ["High / Low", s.highLow],
+    ["Rain", s.rain],
+    ["Wind", s.wind],
+    ["Humidity", s.humidity],
+    ["Sun", s.sun],
+  ].filter(([, value]) => String(value ?? "").trim());
+
+  const ledger = stats.length
+    ? `<div class="weather-ledger">${stats.map(([label,value]) => `<div class="stat"><span class="label">${esc(label)}</span><span class="value">${esc(value)}</span></div>`).join("")}</div>`
+    : "";
+
+  const alerts = (data?.alerts ?? []).filter(Boolean);
+  const marineBits = [
+    data?.tides ? `Tides: ${data.tides}` : "",
+    data?.waterTemp ? `Water: ${data.waterTemp}` : "",
+    data?.surf ? `Surf: ${data.surf}` : "",
+    data?.ripCurrentRisk ? `Rip current: ${data.ripCurrentRisk}` : "",
+  ].filter(Boolean).join(" · ");
+
+  const sourceUrl = safeUrl(data?.sourceUrl);
+  const source = data?.sourceName ? `<span class="source">${esc(data.sourceName)}</span>` : "";
+  const link = sourceUrl ? `<a class="read" href="${sourceUrl}" target="_blank" rel="noopener">Read official conditions →</a>` : "";
+
+  return `<h2>Weather &amp; Ocean</h2>
+    ${ledger}
+    <article class="story"><h3>Best window / Watch out</h3><p>${esc(data?.summary ?? "Boca Raton weather and ocean detail unavailable from verified sources.")}</p>${alerts.length ? `<ul class="brief-list">${alerts.map((a:string)=>`<li>${esc(a)}</li>`).join("")}</ul>` : ""}${source}${link}</article>
+    ${marineBits || data?.beachVerdict ? `<article class="story"><h3>Tides &amp; beach verdict</h3><p>${esc(marineBits)}${data?.beachVerdict ? ` ${esc(data.beachVerdict)}` : ""}</p></article>` : ""}
+    ${(data?.notes ?? []).map(cleanWeatherNote).filter(Boolean).map((n:string)=>`<p class="quiet">${esc(n)}</p>`).join("")}`;
+}
+
 function storyDesk(title: string, items: any[], quiet = "Quiet this morning") {
   const body = (items ?? []).map(story).filter(Boolean).join("");
   return `<h2>${esc(title)}</h2>${body || `<p class="quiet">${esc(quiet)}</p>`}`;
@@ -98,7 +132,7 @@ export async function buildPreviewEdition(env: PreviewEnv) {
     TODAYS_THREAD: `<p>${esc(editorial.todaysThread ?? "")}</p>`,
     FRONT_PAGE: `<span class="kicker">Front Page</span><h2>${esc(front.headline ?? "Morning Briefing")}</h2><p>${esc(front.summary ?? "")}</p>${front.sourceName ? `<span class="source">${esc(front.sourceName)}</span>` : ""}${safeUrl(front.sourceUrl) ? `<a class="read" href="${safeUrl(front.sourceUrl)}" target="_blank" rel="noopener">Read full story →</a>` : ""}`,
     MORNING_BRIEFS: `<h2>Morning in 60 Seconds</h2><ol class="brief-list">${briefs.map((b: string) => `<li>${esc(b)}</li>`).join("")}</ol>`,
-    WEATHER_OCEAN_DESK: `<h2>Weather &amp; Ocean</h2><p>${esc(editorial.weatherOcean?.summary ?? "Boca Raton weather and ocean detail unavailable from verified sources.")}</p><ul class="brief-list">${(editorial.weatherOcean?.notes ?? []).map(cleanWeatherNote).filter(Boolean).map((n: string) => `<li>${esc(n)}</li>`).join("")}</ul>`,
+    WEATHER_OCEAN_DESK: weatherDesk(editorial.weatherOcean ?? {}),
     MARKET_CHARTS: marketPreview,
     MONEY_DESK: storyDesk("Money", editorial.money ?? []),
     AROUND_TOWN_DESK: storyDesk("Around Town", editorial.aroundTown ?? []),
