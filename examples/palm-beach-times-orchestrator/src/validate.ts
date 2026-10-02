@@ -9,6 +9,7 @@ export function validateEditionHtml(html: string) {
   for (const marker of [
     'data-layout="pbt-broadsheet-v6"',
     'data-skill-build="pbt-v6.0"',
+    'data-layout-lock="pbt-canonical-2026-09-30"',
     'data-masthead="pbt-exact-graphical-v1"',
     'data-masthead-source="locked-pbt-artwork"',
     'data-market-period="1d"',
@@ -33,9 +34,20 @@ export function validateEditionHtml(html: string) {
   const volumeBars = (html.match(/class="market-volume-bar"/g) ?? []).length;
   if (volumeBars < 144) errors.push(`market_volume_bars_${volumeBars}`);
 
-  if (!/data-comic-source="generated-image"/i.test(html) ||
-      !/class="comic-image"[^>]*src="data:image\/(?:png|jpeg|webp);base64,[^"]{10000,}"/i.test(html)) {
+  if (!/data-comic-source="generated-image"/i.test(html)) {
     errors.push("comic_not_embedded");
+  }
+
+  const comicImages = html.match(
+    /class="[^"]*comic-image[^"]*"[^>]*src="data:image\/(?:png|jpeg|webp);base64,[^"]{10000,}"/gi,
+  ) ?? [];
+
+  if (comicImages.length !== 3) {
+    errors.push(`comic_panel_count_${comicImages.length}`);
+  }
+
+  if (!html.includes('class="comic-strip-grid"')) {
+    errors.push("comic_strip_grid_missing");
   }
 
   const screen =
