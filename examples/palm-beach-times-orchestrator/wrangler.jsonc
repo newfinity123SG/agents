@@ -10,6 +10,9 @@
       "service": "palm-beach-times-publisher"
     }
   ],
+  "triggers": {
+    "crons": ["0 11 * * *"]
+  },
   "observability": {
     "enabled": true
   }
