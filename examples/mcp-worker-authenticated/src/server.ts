@@ -13,11 +13,39 @@ interface Env {
   GITHUB_CLIENT_ID?: string;
   GITHUB_CLIENT_SECRET?: string;
   ALLOWED_GITHUB_LOGIN?: string;
+  SLACK_WEBHOOK_URL?: string;
   OAUTH_KV: KVNamespace;
 }
 
 const PUBLIC_PUBLISHER_URL =
   "https://palm-beach-times-publisher.steven-a00.workers.dev";
+
+function revisionStamp(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).formatToParts(now);
+
+  const get = (type: string) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+
+  return `${get("year")}${get("month")}${get("day")}-${get("hour")}${get("minute")}${get("second")}`;
+}
+
+function todayNewYork() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date());
+}
 
 const MASTHEAD_OVERRIDE = `<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -113,7 +141,7 @@ const optionalDate = z.preprocess(
 function createServer(env: Env) {
   const server = new McpServer({
     name: "Palm Beach Times Publisher",
-    version: "2.1.0"
+    version: "2.2.0"
   });
 
   server.registerTool(
@@ -233,6 +261,120 @@ function createServer(env: Env) {
       } catch (error) {
         return textResult(
           error instanceof Error ? error.message : "Unknown lookup error",
+          true
+        );
+      }
+    }
+  );
+
+
+  server.registerTool(
+    "deliver_newspaper",
+    {
+      description:
+        "Verify a published Palm Beach Times edition and deliver its cache-busted dated URL through the dedicated Palm Beach Times Slack bot. Delivery is idempotent by edition date unless force=true.",
+      inputSchema: {
+        date: optionalDate,
+        weatherEmoji: z.string().min(1).max(8).optional(),
+        force: z.boolean().default(false)
+      }
+    },
+    async ({ date, weatherEmoji, force }) => {
+      try {
+        requireAuthorizedUser(env);
+
+        if (!env.SLACK_WEBHOOK_URL) {
+          throw new Error("SLACK_WEBHOOK_URL is not configured");
+        }
+
+        const resolvedDate = date ?? todayNewYork();
+        const path = `/${resolvedDate}`;
+        const response = await publisherRequest(env, path, {
+          method: "GET",
+          redirect: "manual",
+          headers: { "Cache-Control": "no-cache" }
+        });
+
+        const html = await response.text();
+
+        if (!response.ok) {
+          return textResult(
+            `Delivery blocked: publisher returned HTTP ${response.status} for ${resolvedDate}`,
+            true
+          );
+        }
+
+        if (!html || html.length < 10000) {
+          return textResult("Delivery blocked: published HTML is missing or too small", true);
+        }
+
+        if (!html.includes(resolvedDate)) {
+          return textResult("Delivery blocked: published edition date does not match", true);
+        }
+
+        const dedupeKey = `pbt-delivery:${resolvedDate}`;
+        const prior = await env.OAUTH_KV.get(dedupeKey);
+
+        if (prior && !force) {
+          return textResult(
+            JSON.stringify(
+              {
+                ok: true,
+                delivered: false,
+                deduped: true,
+                date: resolvedDate,
+                priorDelivery: JSON.parse(prior)
+              },
+              null,
+              2
+            )
+          );
+        }
+
+        const publicUrl =
+          `${PUBLIC_PUBLISHER_URL}/${resolvedDate}?rev=${revisionStamp()}`;
+        const emoji = weatherEmoji?.trim() || "🌴";
+        const message = `Here is today’s paper ${emoji} 📰 ${publicUrl}`;
+
+        const slackResponse = await fetch(env.SLACK_WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: message })
+        });
+
+        const slackBody = await slackResponse.text();
+
+        if (!slackResponse.ok || slackBody.trim().toLowerCase() !== "ok") {
+          return textResult(
+            `Slack delivery failed with HTTP ${slackResponse.status}: ${slackBody.slice(0, 300)}`,
+            true
+          );
+        }
+
+        const deliveredAt = new Date().toISOString();
+        await env.OAUTH_KV.put(
+          dedupeKey,
+          JSON.stringify({ deliveredAt, url: publicUrl }),
+          { expirationTtl: 60 * 60 * 24 * 14 }
+        );
+
+        return textResult(
+          JSON.stringify(
+            {
+              ok: true,
+              delivered: true,
+              deduped: false,
+              date: resolvedDate,
+              deliveredAt,
+              url: publicUrl
+            },
+            null,
+            2
+          )
+        );
+      } catch (error) {
+        return textResult(
+          error instanceof Error ? error.message : "Unknown Slack delivery error",
           true
         );
       }
