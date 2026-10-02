@@ -109,6 +109,15 @@ function publisherRequest(env: Env, path: string, init?: RequestInit) {
 }
 
 function applyPalmBeachTimesMasthead(html: string): string {
+  // Production v6 editions already contain the locked graphical masthead.
+  // Preserve them byte-for-byte instead of layering the legacy text masthead CSS on top.
+  if (
+    html.includes('data-masthead="pbt-exact-graphical-v1"') &&
+    html.includes('data-masthead-source="locked-pbt-artwork"')
+  ) {
+    return html;
+  }
+
   let updated = html
     .replace(
       /<div\s+class=["']the["']>\s*THE\s*<\/div>\s*(<h1[^>]*>)\s*(?:THE\s+)?PALM BEACH TIMES\s*(<\/h1>)/i,
@@ -203,7 +212,9 @@ function createServer(env: Env) {
               date: result.date ?? date,
               title: result.title ?? title,
               editionType: result.editionType ?? editionType,
-              mastheadStyle: "classic-blackletter",
+              mastheadStyle: publishedHtml.includes('data-masthead-source="locked-pbt-artwork"')
+                ? "locked-graphical"
+                : "classic-blackletter",
               url: `${PUBLIC_PUBLISHER_URL}/${date}`,
               todayUrl: `${PUBLIC_PUBLISHER_URL}/today`
             },
@@ -308,8 +319,14 @@ function createServer(env: Env) {
           return textResult("Delivery blocked: published HTML is missing or too small", true);
         }
 
-        if (!html.includes(resolvedDate)) {
-          return textResult("Delivery blocked: published edition date does not match", true);
+        if (
+          !html.includes('data-layout="pbt-broadsheet-v6"') ||
+          !html.includes('data-skill-build="pbt-v6.0"')
+        ) {
+          return textResult(
+            "Delivery blocked: published edition is missing required Palm Beach Times production markers",
+            true
+          );
         }
 
         const dedupeKey = `pbt-delivery:${resolvedDate}`;
