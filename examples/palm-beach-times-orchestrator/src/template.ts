@@ -99,7 +99,7 @@ a{color:var(--accent);text-underline-offset:2px}
 </style>
 </head>
 <body>
-<main class="paper" data-layout="pbt-broadsheet-v6" data-skill-build="pbt-v6.0">
+<main class="paper" data-layout="pbt-broadsheet-v6" data-skill-build="pbt-v6.0" data-layout-lock="pbt-canonical-2026-09-30">
 <header class="masthead">
   <div class="meta"><span><span class="edition">{{EDITION}}</span> · {{REGION_LABEL}}</span><span>{{DATE}}</span><span>{{DESK_LABEL}}</span></div>
   <div class="nameplate" data-masthead="pbt-exact-graphical-v1">
