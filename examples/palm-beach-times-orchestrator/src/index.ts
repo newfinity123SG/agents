@@ -1,39 +1,20 @@
-import { buildPreviewEdition } from "./preview";
-import { runResearchDryRun } from "./research";
-
 interface Env {
-  OPENAI_API_KEY: string;
   SLACK_WEBHOOK_URL: string;
   PUBLISHER: Fetcher;
 }
 
-type Stage =
-  | "idle"
-  | "triggered"
-  | "research_started"
-  | "market_data_ready"
-  | "comic_ready"
-  | "html_built"
-  | "validation_passed"
-  | "published"
-  | "publisher_verified"
-  | "slack_sent"
-  | "slack_verified"
-  | "complete"
-  | "failed";
-
-interface RunStatus {
+type DeliveryStatus = {
   ok: boolean;
   service: string;
-  stage: Stage;
+  stage: "idle" | "publisher_verified" | "slack_sent" | "failed";
   date?: string;
   detail?: string;
   updatedAt: string;
-}
+};
 
-let lastStatus: RunStatus = {
+let lastStatus: DeliveryStatus = {
   ok: true,
-  service: "palm-beach-times-orchestrator",
+  service: "palm-beach-times-delivery",
   stage: "idle",
   updatedAt: new Date(0).toISOString(),
 };
@@ -48,131 +29,138 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function logStage(stage: Stage, detail?: string, date?: string) {
-  lastStatus = {
-    ok: stage !== "failed",
-    service: "palm-beach-times-orchestrator",
-    stage,
-    date,
-    detail,
-    updatedAt: new Date().toISOString(),
-  };
-
-  console.log(
-    JSON.stringify({
-      event: "pbt_stage",
-      stage,
-      date,
-      detail,
-      at: lastStatus.updatedAt,
-    }),
-  );
-}
-
-async function verifyPublisher(env: Env) {
-  const response = await env.PUBLISHER.fetch(
-    new Request("https://publisher.internal/health"),
-  );
-
-  if (!response.ok) {
-    throw new Error(`publisher_health_http_${response.status}`);
-  }
-
-  return response.json();
-}
-
-async function verifyOpenAI(env: Env) {
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gpt-6-luna",
-      input: "Reply with exactly: PBT_OPENAI_OK",
-      max_output_tokens: 24,
-    }),
-  });
-
-  const body = await response.text();
-
-  if (!response.ok) {
-    throw new Error(`openai_http_${response.status}: ${body.slice(0, 500)}`);
-  }
-
-  let parsed: any;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    throw new Error("openai_invalid_json");
-  }
-
-  const outputText =
-    parsed.output_text ??
-    parsed.output
-      ?.flatMap((item: any) => item.content ?? [])
-      ?.find((part: any) => part.type === "output_text")
-      ?.text ??
-    "";
-
-  if (!String(outputText).includes("PBT_OPENAI_OK")) {
-    throw new Error("openai_unexpected_response");
-  }
-
-  return { ok: true, model: "gpt-6-luna" };
-}
-
-async function sendSlackTest(env: Env) {
-  const text =
-    "✅ Palm Beach Times delivery test — Cloudflare orchestrator is connected to #personal-flo.";
-
-  const response = await fetch(env.SLACK_WEBHOOK_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
-  });
-
-  const body = await response.text();
-
-  if (!response.ok || body.trim().toLowerCase() !== "ok") {
-    throw new Error(`slack_http_${response.status}: ${body.slice(0, 500)}`);
-  }
-
-  return { ok: true };
-}
-
-async function runSkeleton(env: Env, source: "manual" | "scheduled") {
-  const now = new Date();
-  const date = new Intl.DateTimeFormat("en-CA", {
+function nyDate(now = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/New_York",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
   }).format(now);
+}
 
-  logStage("triggered", `source=${source}`, date);
+function revisionStamp(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
 
-  if (!env.OPENAI_API_KEY) {
-    logStage("failed", "OPENAI_API_KEY missing", date);
-    throw new Error("OPENAI_API_KEY missing");
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("year")}${get("month")}${get("day")}-${get("hour")}${get("minute")}${get("second")}`;
+}
+
+function setStatus(
+  stage: DeliveryStatus["stage"],
+  detail?: string,
+  date?: string,
+) {
+  lastStatus = {
+    ok: stage !== "failed",
+    service: "palm-beach-times-delivery",
+    stage,
+    detail,
+    date,
+    updatedAt: new Date().toISOString(),
+  };
+  console.log(JSON.stringify({ event: "pbt_delivery", ...lastStatus }));
+}
+
+async function fetchPublishedEdition(env: Env, date: string) {
+  // Use the Publisher service binding so delivery never depends on Flo,
+  // ChatGPT Slack transport, or the retired orchestrator build path.
+  const response = await env.PUBLISHER.fetch(
+    new Request(`https://publisher.internal/${date}`, {
+      method: "GET",
+      headers: { "Cache-Control": "no-cache" },
+    }),
+  );
+
+  const html = await response.text();
+
+  if (!response.ok) {
+    throw new Error(`publisher_http_${response.status}`);
   }
 
+  if (!html || html.length < 10000) {
+    throw new Error("publisher_html_missing_or_too_small");
+  }
+
+  if (!html.includes(date)) {
+    throw new Error("publisher_wrong_date");
+  }
+
+  if (!html.includes('data-layout="pbt-broadsheet-v6"')) {
+    throw new Error("publisher_layout_marker_missing");
+  }
+
+  if (!html.includes('data-masthead="pbt-exact-graphical-v1"')) {
+    throw new Error("publisher_masthead_marker_missing");
+  }
+
+  if (!html.includes('id="screen-guide"')) {
+    throw new Error("publisher_screen_guide_missing");
+  }
+
+  const marketCharts = (html.match(/class="market-chart"/g) ?? []).length;
+  if (marketCharts !== 3) {
+    throw new Error(`publisher_market_chart_count_${marketCharts}`);
+  }
+
+  if (!html.includes('data-comic-source="generated-image"')) {
+    throw new Error("publisher_comic_missing");
+  }
+
+  return html;
+}
+
+async function sendSlack(env: Env, date: string) {
   if (!env.SLACK_WEBHOOK_URL) {
-    logStage("failed", "SLACK_WEBHOOK_URL missing", date);
     throw new Error("SLACK_WEBHOOK_URL missing");
   }
 
-  const publisher = await verifyPublisher(env);
-  logStage("complete", "skeleton health checks passed", date);
+  const publicUrl =
+    `https://palm-beach-times-publisher.steven-a00.workers.dev/${date}` +
+    `?rev=${revisionStamp()}`;
+
+  // Keep delivery intentionally dumb. The newspaper is already built,
+  // validated and published before this Worker touches anything.
+  const message = `Here is today’s paper 🌴 📰 ${publicUrl}`;
+
+  const response = await fetch(env.SLACK_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: message }),
+  });
+
+  const body = await response.text();
+
+  if (!response.ok || body.trim().toLowerCase() !== "ok") {
+    throw new Error(`slack_http_${response.status}: ${body.slice(0, 300)}`);
+  }
+
+  return { message, url: publicUrl };
+}
+
+async function deliver(env: Env, source: "manual" | "scheduled") {
+  const date = nyDate();
+
+  await fetchPublishedEdition(env, date);
+  setStatus("publisher_verified", `source=${source}`, date);
+
+  const slack = await sendSlack(env, date);
+  setStatus("slack_sent", `source=${source}`, date);
 
   return {
     ok: true,
     date,
     source,
-    publisher,
-    stage: "complete",
-    note: "Generation pipeline is not enabled yet.",
+    stage: "slack_sent",
+    url: slack.url,
   };
 }
 
@@ -181,18 +169,21 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === "GET" && url.pathname === "/health") {
+      const date = nyDate();
       try {
-        const publisher = await verifyPublisher(env);
+        await fetchPublishedEdition(env, date);
         return json({
           ok: true,
-          service: "palm-beach-times-orchestrator",
-          publisher,
+          service: "palm-beach-times-delivery",
+          date,
+          publisher: "verified",
         });
       } catch (error) {
         return json(
           {
             ok: false,
-            service: "palm-beach-times-orchestrator",
+            service: "palm-beach-times-delivery",
+            date,
             error: error instanceof Error ? error.message : String(error),
           },
           503,
@@ -204,87 +195,13 @@ export default {
       return json(lastStatus);
     }
 
-    if (request.method === "POST" && url.pathname === "/run-test") {
+    if (request.method === "POST" && url.pathname === "/deliver") {
       try {
-        return json(await runSkeleton(env, "manual"));
+        return json(await deliver(env, "manual"));
       } catch (error) {
-        return json(
-          {
-            ok: false,
-            error: error instanceof Error ? error.message : String(error),
-            status: lastStatus,
-          },
-          500,
-        );
-      }
-    }
-
-    if (request.method === "POST" && url.pathname === "/test-openai") {
-      try {
-        return json(await verifyOpenAI(env));
-      } catch (error) {
-        return json(
-          {
-            ok: false,
-            error: error instanceof Error ? error.message : String(error),
-          },
-          500,
-        );
-      }
-    }
-
-    if (request.method === "POST" && url.pathname === "/test-slack") {
-      try {
-        return json(await sendSlackTest(env));
-      } catch (error) {
-        return json(
-          {
-            ok: false,
-            error: error instanceof Error ? error.message : String(error),
-          },
-          500,
-        );
-      }
-    }
-
-    if (request.method === "POST" && url.pathname === "/dry-run-research") {
-      try {
-        logStage("research_started", "manual dry-run research");
-        const result = await runResearchDryRun(env);
-        return json(result);
-      } catch (error) {
-        logStage(
-          "failed",
-          error instanceof Error ? error.message : String(error),
-        );
-        return json(
-          {
-            ok: false,
-            error: error instanceof Error ? error.message : String(error),
-          },
-          500,
-        );
-      }
-    }
-
-    if (request.method === "POST" && url.pathname === "/preview-edition") {
-      try {
-        logStage("html_built", "manual preview build started");
-        const result = await buildPreviewEdition(env);
-        logStage("validation_passed", "preview HTML assembled", result.date);
-        return json(result);
-      } catch (error) {
-        logStage(
-          "failed",
-          error instanceof Error ? error.message : String(error),
-        );
-        return json(
-          {
-            ok: false,
-            error: error instanceof Error ? error.message : String(error),
-          },
-          500,
-        );
+        const detail = error instanceof Error ? error.message : String(error);
+        setStatus("failed", detail, nyDate());
+        return json({ ok: false, error: detail, status: lastStatus }, 500);
       }
     }
 
@@ -297,12 +214,14 @@ export default {
     _ctx: ExecutionContext,
   ): Promise<void> {
     try {
-      await runSkeleton(env, "scheduled");
+      await deliver(env, "scheduled");
     } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      setStatus("failed", detail, nyDate());
       console.error(
         JSON.stringify({
-          event: "pbt_scheduled_failure",
-          error: error instanceof Error ? error.message : String(error),
+          event: "pbt_delivery_failure",
+          error: detail,
           at: new Date().toISOString(),
         }),
       );
