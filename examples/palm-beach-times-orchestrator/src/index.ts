@@ -38,6 +38,16 @@ function nyDate(now = new Date()) {
   }).format(now);
 }
 
+function nyHour(now = new Date()) {
+  return Number(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      hour: "2-digit",
+      hour12: false,
+    }).format(now),
+  );
+}
+
 function revisionStamp(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/New_York",
@@ -213,6 +223,8 @@ export default {
     env: Env,
     _ctx: ExecutionContext,
   ): Promise<void> {
+    if (nyHour() !== 7) return;
+
     try {
       await deliver(env, "scheduled");
     } catch (error) {
