@@ -323,7 +323,7 @@ function createServer(env: Env) {
     {
       description: "Store one bounded HTML chunk for a new Palm Beach Times edition. Send sequential chunks of at most 24000 characters, numbered from zero. Do not deliver until finalize_newspaper_upload succeeds.",
       inputSchema: {
-        date: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
         uploadId: z.string().regex(/^[a-zA-Z0-9_-]{8,64}$/),
         index: z.number().int().min(0).max(399),
         total: z.number().int().min(1).max(400),
@@ -351,7 +351,7 @@ function createServer(env: Env) {
     {
       description: "Assemble previously uploaded HTML chunks, run production validation, verify the expected SHA-256 and publish through the Publisher v2 stage/activate endpoints. Call only after all chunks were uploaded.",
       inputSchema: {
-        date: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
         uploadId: z.string().regex(/^[a-zA-Z0-9_-]{8,64}$/),
         total: z.number().int().min(1).max(400),
         sha256: z.string().regex(/^[a-f0-9]{64}$/),
