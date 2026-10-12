@@ -179,7 +179,7 @@ const optionalDate = z.preprocess(
 function createServer(env: Env) {
   const server = new McpServer({
     name: "Palm Beach Times Publisher",
-    version: "2.4.0"
+    version: "2.4.1"
   });
 
   server.registerTool(
@@ -337,9 +337,9 @@ function createServer(env: Env) {
         await env.OAUTH_KV.put(
           `pbt-upload:${date}:${uploadId}:${index}`,
           JSON.stringify({ total, chunk }),
-          { expirationTtl: 7200 }
+          { expirationTtl: 8 * 60 * 60 }
         );
-        return textResult(JSON.stringify({ ok: true, stored: index, total, uploadId }));
+        return textResult(JSON.stringify({ ok: true, stored: index, total, uploadId, expiresInSeconds: 8 * 60 * 60 }));
       } catch (error) {
         return textResult(error instanceof Error ? error.message : "Chunk storage failed", true);
       }
