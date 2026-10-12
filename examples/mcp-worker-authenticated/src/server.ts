@@ -315,6 +315,123 @@ function createServer(env: Env) {
     }
   );
 
+  // Bounded MCP arguments: upload an HTML edition in ordered, short chunks.
+  // Each chunk is stored temporarily; finalization validates the assembled
+  // document before sending it to the R2-backed Publisher v2.
+  server.registerTool(
+    "upload_newspaper_chunk",
+    {
+      description: "Store one bounded HTML chunk for a new Palm Beach Times edition. Send sequential chunks of at most 24000 characters, numbered from zero. Do not deliver until finalize_newspaper_upload succeeds.",
+      inputSchema: {
+        date: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
+        uploadId: z.string().regex(/^[a-zA-Z0-9_-]{8,64}$/),
+        index: z.number().int().min(0).max(399),
+        total: z.number().int().min(1).max(400),
+        chunk: z.string().min(1).max(24000)
+      }
+    },
+    async ({ date, uploadId, index, total, chunk }) => {
+      try {
+        requireAuthorizedUser(env);
+        if (index >= total) return textResult("Invalid chunk index", true);
+        await env.OAUTH_KV.put(
+          `pbt-upload:${date}:${uploadId}:${index}`,
+          JSON.stringify({ total, chunk }),
+          { expirationTtl: 7200 }
+        );
+        return textResult(JSON.stringify({ ok: true, stored: index, total, uploadId }));
+      } catch (error) {
+        return textResult(error instanceof Error ? error.message : "Chunk storage failed", true);
+      }
+    }
+  );
+
+  server.registerTool(
+    "finalize_newspaper_upload",
+    {
+      description: "Assemble previously uploaded HTML chunks, run production validation, verify the expected SHA-256 and publish through the Publisher v2 stage/activate endpoints. Call only after all chunks were uploaded.",
+      inputSchema: {
+        date: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
+        uploadId: z.string().regex(/^[a-zA-Z0-9_-]{8,64}$/),
+        total: z.number().int().min(1).max(400),
+        sha256: z.string().regex(/^[a-f0-9]{64}$/),
+        title: z.string().default("The Palm Beach Times"),
+        editionType: z.enum(["weekday", "friday-weekend", "weekend"]).default("weekday")
+      }
+    },
+    async ({ date, uploadId, total, sha256, title, editionType }) => {
+      try {
+        requireAuthorizedUser(env);
+        const token = requirePublishToken(env);
+        const parts: string[] = [];
+        for (let i = 0; i < total; i++) {
+          const value = await env.OAUTH_KV.get(`pbt-upload:${date}:${uploadId}:${i}`);
+          if (!value) return textResult(`Chunk ${i} not yet available; retry finalization after KV propagation`, true);
+          const parsed = JSON.parse(value) as { total: number; chunk: string };
+          if (parsed.total !== total || typeof parsed.chunk !== "string") {
+            return textResult(`Chunk ${i} has inconsistent metadata`, true);
+          }
+          parts.push(parsed.chunk);
+        }
+        const html = parts.join("");
+        const errors = validatePalmBeachTimesProductionHtml(html);
+        if (errors.length) return textResult(`Publishing blocked: ${errors.join("; ")}`, true);
+        const bytes = new TextEncoder().encode(html);
+        if (bytes.byteLength > 12_000_000) return textResult("HTML exceeds Publisher v2 size limit", true);
+        const computed = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
+          .map((b) => b.toString(16).padStart(2, "0")).join("");
+        if (computed !== sha256) return textResult("Assembled HTML SHA-256 mismatch", true);
+        const stage = await publisherRequest(env, "/api/stage", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "text/html; charset=utf-8",
+            "x-edition-date": date,
+            "x-edition-title": title,
+            "x-edition-type": editionType,
+            "x-content-sha256": sha256
+          },
+          body: html
+        });
+        const stageBody = await stage.text();
+        if (!stage.ok) return textResult(`Staging failed HTTP ${stage.status}: ${stageBody}`, true);
+        const staged = JSON.parse(stageBody) as Record<string, unknown>;
+        if (staged.ok !== true || staged.sha256 !== sha256 || staged.bytes !== bytes.byteLength) {
+          return textResult("Staged payload integrity check failed", true);
+        }
+        const activated = await publisherRequest(env, "/api/activate", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ date, sha256 })
+        });
+        const activeBody = await activated.text();
+        if (!activated.ok) return textResult(`Activation failed HTTP ${activated.status}: ${activeBody}`, true);
+        const active = JSON.parse(activeBody) as Record<string, unknown>;
+        if (active.ok !== true || active.sha256 !== sha256 || active.bytes !== bytes.byteLength) {
+          return textResult("Activation integrity check failed", true);
+        }
+        for (const route of [`/${date}`, "/today"]) {
+          const res = await publisherRequest(env, route, { method: "GET" });
+          if (!res.ok) return textResult(`Post-activation verification failed at ${route}: HTTP ${res.status}`, true);
+          const read = await res.arrayBuffer();
+          const check = [...new Uint8Array(await crypto.subtle.digest("SHA-256", read))]
+            .map((b) => b.toString(16).padStart(2, "0")).join("");
+          if (check !== sha256 || read.byteLength !== bytes.byteLength) {
+            return textResult(`Post-activation checksum mismatch at ${route}`, true);
+          }
+        }
+        return textResult(JSON.stringify({
+          ok: true, verified: true, date, sha256, bytes: bytes.byteLength,
+          url: `${PUBLIC_PUBLISHER_URL}/${date}`,
+          todayUrl: `${PUBLIC_PUBLISHER_URL}/today`,
+          delivery: "NOT_SENT"
+        }, null, 2));
+      } catch (error) {
+        return textResult(error instanceof Error ? error.message : "Finalize failed", true);
+      }
+    }
+  );
+
   server.registerTool(
     "get_newspaper",
     {
