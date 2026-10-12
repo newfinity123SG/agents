@@ -1,0 +1,27 @@
+name: Palm Beach Times MCP build check
+
+on:
+  pull_request:
+    paths:
+      - "examples/mcp-worker-authenticated/**"
+      - ".github/workflows/pbt-mcp-build.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: corepack enable
+      - uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec vite build
+        working-directory: examples/mcp-worker-authenticated

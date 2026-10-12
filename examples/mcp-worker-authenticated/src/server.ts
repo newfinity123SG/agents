@@ -13,7 +13,8 @@ interface Env {
   GITHUB_CLIENT_ID?: string;
   GITHUB_CLIENT_SECRET?: string;
   ALLOWED_GITHUB_LOGIN?: string;
-  SLACK_WEBHOOK_URL?: string;
+  SLACK_BOT_TOKEN?: string;
+  SLACK_CHANNEL_ID?: string;
   OAUTH_KV: KVNamespace;
 }
 
@@ -139,6 +140,34 @@ function applyPalmBeachTimesMasthead(html: string): string {
   return `${MASTHEAD_OVERRIDE}\n${updated}`;
 }
 
+function validatePalmBeachTimesProductionHtml(html: string): string[] {
+  const errors: string[] = [];
+  if (html.length < 10000) errors.push("HTML is missing or too small");
+  for (const [marker, name] of [
+    ['data-layout="pbt-broadsheet-v6"', "v6 layout"],
+    ['data-skill-build="pbt-v6.0"', "v6 build"],
+    ['data-masthead="pbt-exact-graphical-v1"', "locked graphical masthead"],
+    ['data-masthead-source="locked-pbt-artwork"', "locked masthead artwork"],
+    ['class="todays-thread"', "Today's Thread"],
+    ['id="front-page"', "Front Page"],
+    ['id="weather-ocean"', "Weather & Ocean"],
+    ['id="money"', "Money"]
+  ]) {
+    if (!html.includes(marker)) errors.push(`Missing ${name}`);
+  }
+  return errors;
+}
+
+async function verifyPublishedPalmBeachTimes(env: Env, path: string) {
+  const response = await publisherRequest(env, path, {
+    method: "GET",
+    headers: { "Cache-Control": "no-cache" }
+  });
+  const html = await response.text();
+  const errors = response.ok ? validatePalmBeachTimesProductionHtml(html) : [`HTTP ${response.status}`];
+  return { ok: response.ok && errors.length === 0, status: response.status, htmlLength: html.length, errors };
+}
+
 const optionalDate = z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
   z
@@ -150,14 +179,14 @@ const optionalDate = z.preprocess(
 function createServer(env: Env) {
   const server = new McpServer({
     name: "Palm Beach Times Publisher",
-    version: "2.2.0"
+    version: "2.4.0"
   });
 
   server.registerTool(
     "publish_newspaper",
     {
       description:
-        "Publish a completed Palm Beach Times HTML edition and return browser URLs for the dated edition and /today. The publisher automatically applies the classic Palm Beach Times blackletter masthead treatment.",
+        "Publish a validated Palm Beach Times v6 HTML edition through staged Publisher v2 upload, SHA-256 verification, and activation.",
       inputSchema: {
         date: z
           .string()
@@ -173,36 +202,91 @@ function createServer(env: Env) {
       try {
         requireAuthorizedUser(env);
         const publishToken = requirePublishToken(env);
-        const publishedHtml = applyPalmBeachTimesMasthead(html);
+        const preflightErrors = validatePalmBeachTimesProductionHtml(html);
+        if (preflightErrors.length) return textResult(`Publishing blocked: ${preflightErrors.join("; ")}`, true);
+        const publishedHtml = html;
 
-        const response = await publisherRequest(env, "/api/publish", {
+        // Publisher v2 two-phase transfer. Raw UTF-8 bytes are staged in R2
+        // and verified by SHA-256 before the dated edition is activated.
+        // Note: the legacy MCP input still carries full HTML; callers with
+        // tool-argument size limits need a separate upload transport.
+        const bytes = new TextEncoder().encode(publishedHtml);
+        const digestBytes = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+        const sha256 = [...digestBytes]
+          .map((byte) => byte.toString(16).padStart(2, "0"))
+          .join("");
+
+        const stageResponse = await publisherRequest(env, "/api/stage", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${publishToken}`,
+            "Content-Type": "text/html; charset=utf-8",
+            "x-edition-date": date,
+            "x-edition-title": title,
+            "x-edition-type": editionType,
+            "x-content-sha256": sha256
+          },
+          body: publishedHtml
+        });
+        const stageBody = await stageResponse.text();
+        if (!stageResponse.ok) {
+          return textResult(
+            `Staging failed with HTTP ${stageResponse.status}: ${stageBody}`,
+            true
+          );
+        }
+        let staged: Record<string, unknown>;
+        try {
+          staged = JSON.parse(stageBody) as Record<string, unknown>;
+        } catch {
+          return textResult("Staging returned invalid JSON", true);
+        }
+        if (staged.ok !== true || staged.sha256 !== sha256 || staged.bytes !== bytes.byteLength) {
+          return textResult("Staging failed integrity confirmation", true);
+        }
+
+        const response = await publisherRequest(env, "/api/activate", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${publishToken}`,
             "Content-Type": "application/json"
           },
-          body: JSON.stringify({
-            date,
-            html: publishedHtml,
-            title,
-            editionType
-          })
+          body: JSON.stringify({ date, sha256 })
         });
-
         const body = await response.text();
         if (!response.ok) {
           return textResult(
-            `Publishing failed with HTTP ${response.status}: ${body}`,
+            `Activation failed with HTTP ${response.status}: ${body}`,
             true
           );
         }
 
-        let result: Record<string, unknown> = {};
+        let result: Record<string, unknown>;
         try {
           result = JSON.parse(body) as Record<string, unknown>;
         } catch {
-          // Public URLs are synthesized below because the service binding
-          // invokes the publisher using an internal hostname.
+          return textResult("Activation returned invalid JSON", true);
+        }
+        if (result.ok !== true || result.sha256 !== sha256 || result.bytes !== bytes.byteLength) {
+          return textResult("Activation failed integrity confirmation", true);
+        }
+        for (const checkPath of [`/${date}`, "/today"]) {
+          const verify = await publisherRequest(env, checkPath, {
+            method: "GET",
+            headers: { "Cache-Control": "no-cache" }
+          });
+          if (!verify.ok) {
+            return textResult(`Publication verification failed for ${checkPath}: HTTP ${verify.status}`, true);
+          }
+          const fetched = new Uint8Array(await verify.arrayBuffer());
+          if (fetched.byteLength !== bytes.byteLength) {
+            return textResult(`Publication verification failed for ${checkPath}: byte mismatch`, true);
+          }
+          const verifiedDigest = new Uint8Array(await crypto.subtle.digest("SHA-256", fetched));
+          const verifiedSha = [...verifiedDigest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+          if (verifiedSha !== sha256) {
+            return textResult(`Publication verification failed for ${checkPath}: SHA-256 mismatch`, true);
+          }
         }
 
         return textResult(
@@ -227,6 +311,123 @@ function createServer(env: Env) {
           error instanceof Error ? error.message : "Unknown publishing error",
           true
         );
+      }
+    }
+  );
+
+  // Bounded MCP arguments: upload an HTML edition in ordered, short chunks.
+  // Each chunk is stored temporarily; finalization validates the assembled
+  // document before sending it to the R2-backed Publisher v2.
+  server.registerTool(
+    "upload_newspaper_chunk",
+    {
+      description: "Store one bounded HTML chunk for a new Palm Beach Times edition. Send sequential chunks of at most 24000 characters, numbered from zero. Do not deliver until finalize_newspaper_upload succeeds.",
+      inputSchema: {
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        uploadId: z.string().regex(/^[a-zA-Z0-9_-]{8,64}$/),
+        index: z.number().int().min(0).max(399),
+        total: z.number().int().min(1).max(400),
+        chunk: z.string().min(1).max(24000)
+      }
+    },
+    async ({ date, uploadId, index, total, chunk }) => {
+      try {
+        requireAuthorizedUser(env);
+        if (index >= total) return textResult("Invalid chunk index", true);
+        await env.OAUTH_KV.put(
+          `pbt-upload:${date}:${uploadId}:${index}`,
+          JSON.stringify({ total, chunk }),
+          { expirationTtl: 7200 }
+        );
+        return textResult(JSON.stringify({ ok: true, stored: index, total, uploadId }));
+      } catch (error) {
+        return textResult(error instanceof Error ? error.message : "Chunk storage failed", true);
+      }
+    }
+  );
+
+  server.registerTool(
+    "finalize_newspaper_upload",
+    {
+      description: "Assemble previously uploaded HTML chunks, run production validation, verify the expected SHA-256 and publish through the Publisher v2 stage/activate endpoints. Call only after all chunks were uploaded.",
+      inputSchema: {
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        uploadId: z.string().regex(/^[a-zA-Z0-9_-]{8,64}$/),
+        total: z.number().int().min(1).max(400),
+        sha256: z.string().regex(/^[a-f0-9]{64}$/),
+        title: z.string().default("The Palm Beach Times"),
+        editionType: z.enum(["weekday", "friday-weekend", "weekend"]).default("weekday")
+      }
+    },
+    async ({ date, uploadId, total, sha256, title, editionType }) => {
+      try {
+        requireAuthorizedUser(env);
+        const token = requirePublishToken(env);
+        const parts: string[] = [];
+        for (let i = 0; i < total; i++) {
+          const value = await env.OAUTH_KV.get(`pbt-upload:${date}:${uploadId}:${i}`);
+          if (!value) return textResult(`Chunk ${i} not yet available; retry finalization after KV propagation`, true);
+          const parsed = JSON.parse(value) as { total: number; chunk: string };
+          if (parsed.total !== total || typeof parsed.chunk !== "string") {
+            return textResult(`Chunk ${i} has inconsistent metadata`, true);
+          }
+          parts.push(parsed.chunk);
+        }
+        const html = parts.join("");
+        const errors = validatePalmBeachTimesProductionHtml(html);
+        if (errors.length) return textResult(`Publishing blocked: ${errors.join("; ")}`, true);
+        const bytes = new TextEncoder().encode(html);
+        if (bytes.byteLength > 12_000_000) return textResult("HTML exceeds Publisher v2 size limit", true);
+        const computed = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
+          .map((b) => b.toString(16).padStart(2, "0")).join("");
+        if (computed !== sha256) return textResult("Assembled HTML SHA-256 mismatch", true);
+        const stage = await publisherRequest(env, "/api/stage", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "text/html; charset=utf-8",
+            "x-edition-date": date,
+            "x-edition-title": title,
+            "x-edition-type": editionType,
+            "x-content-sha256": sha256
+          },
+          body: html
+        });
+        const stageBody = await stage.text();
+        if (!stage.ok) return textResult(`Staging failed HTTP ${stage.status}: ${stageBody}`, true);
+        const staged = JSON.parse(stageBody) as Record<string, unknown>;
+        if (staged.ok !== true || staged.sha256 !== sha256 || staged.bytes !== bytes.byteLength) {
+          return textResult("Staged payload integrity check failed", true);
+        }
+        const activated = await publisherRequest(env, "/api/activate", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ date, sha256 })
+        });
+        const activeBody = await activated.text();
+        if (!activated.ok) return textResult(`Activation failed HTTP ${activated.status}: ${activeBody}`, true);
+        const active = JSON.parse(activeBody) as Record<string, unknown>;
+        if (active.ok !== true || active.sha256 !== sha256 || active.bytes !== bytes.byteLength) {
+          return textResult("Activation integrity check failed", true);
+        }
+        for (const route of [`/${date}`, "/today"]) {
+          const res = await publisherRequest(env, route, { method: "GET" });
+          if (!res.ok) return textResult(`Post-activation verification failed at ${route}: HTTP ${res.status}`, true);
+          const read = await res.arrayBuffer();
+          const check = [...new Uint8Array(await crypto.subtle.digest("SHA-256", read))]
+            .map((b) => b.toString(16).padStart(2, "0")).join("");
+          if (check !== sha256 || read.byteLength !== bytes.byteLength) {
+            return textResult(`Post-activation checksum mismatch at ${route}`, true);
+          }
+        }
+        return textResult(JSON.stringify({
+          ok: true, verified: true, date, sha256, bytes: bytes.byteLength,
+          url: `${PUBLIC_PUBLISHER_URL}/${date}`,
+          todayUrl: `${PUBLIC_PUBLISHER_URL}/today`,
+          delivery: "NOT_SENT"
+        }, null, 2));
+      } catch (error) {
+        return textResult(error instanceof Error ? error.message : "Finalize failed", true);
       }
     }
   );
@@ -294,9 +495,8 @@ function createServer(env: Env) {
       try {
         requireAuthorizedUser(env);
 
-        if (!env.SLACK_WEBHOOK_URL) {
-          throw new Error("SLACK_WEBHOOK_URL is not configured");
-        }
+        if (!env.SLACK_BOT_TOKEN) throw new Error("SLACK_BOT_TOKEN is not configured");
+        if (!env.SLACK_CHANNEL_ID) throw new Error("SLACK_CHANNEL_ID is not configured");
 
         const resolvedDate = date ?? todayNewYork();
         const path = `/${resolvedDate}`;
@@ -315,18 +515,9 @@ function createServer(env: Env) {
           );
         }
 
-        if (!html || html.length < 10000) {
-          return textResult("Delivery blocked: published HTML is missing or too small", true);
-        }
-
-        if (
-          !html.includes('data-layout="pbt-broadsheet-v6"') ||
-          !html.includes('data-skill-build="pbt-v6.0"')
-        ) {
-          return textResult(
-            "Delivery blocked: published edition is missing required Palm Beach Times production markers",
-            true
-          );
+        const integrityErrors = validatePalmBeachTimesProductionHtml(html);
+        if (integrityErrors.length) {
+          return textResult(`Delivery blocked: ${integrityErrors.join("; ")}`, true);
         }
 
         const dedupeKey = `pbt-delivery:${resolvedDate}`;
@@ -353,19 +544,27 @@ function createServer(env: Env) {
         const emoji = weatherEmoji?.trim() || "🌴";
         const message = `Here is today’s paper ${emoji} 📰 ${publicUrl}`;
 
-        const slackResponse = await fetch(env.SLACK_WEBHOOK_URL, {
+        const slackResponse = await fetch("https://slack.com/api/chat.postMessage", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: message })
+          headers: {
+            Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+            "Content-Type": "application/json; charset=utf-8"
+          },
+          body: JSON.stringify({
+            channel: env.SLACK_CHANNEL_ID,
+            text: message,
+            unfurl_links: false,
+            unfurl_media: false
+          })
         });
-
-        const slackBody = await slackResponse.text();
-
-        if (!slackResponse.ok || slackBody.trim().toLowerCase() !== "ok") {
-          return textResult(
-            `Slack delivery failed with HTTP ${slackResponse.status}: ${slackBody.slice(0, 300)}`,
-            true
-          );
+        let slackResult: { ok?: boolean; error?: string };
+        try {
+          slackResult = await slackResponse.json() as { ok?: boolean; error?: string };
+        } catch {
+          return textResult("Slack delivery failed: invalid JSON response", true);
+        }
+        if (!slackResponse.ok || !slackResult.ok) {
+          return textResult(`Slack delivery failed: ${slackResult.error || `HTTP ${slackResponse.status}`}`, true);
         }
 
         const deliveredAt = new Date().toISOString();

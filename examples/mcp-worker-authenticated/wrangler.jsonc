@@ -1,7 +1,7 @@
 {
   // Deployment refresh: Palm Beach Times MCP Slack delivery
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "palm-beach-times-mcp",
+  "name": "agents",
   "compatibility_date": "2026-06-11",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/server.ts",
