@@ -13,7 +13,8 @@ interface Env {
   GITHUB_CLIENT_ID?: string;
   GITHUB_CLIENT_SECRET?: string;
   ALLOWED_GITHUB_LOGIN?: string;
-  SLACK_WEBHOOK_URL?: string;
+  SLACK_BOT_TOKEN?: string;
+  SLACK_CHANNEL_ID?: string;
   OAUTH_KV: KVNamespace;
 }
 
@@ -139,6 +140,34 @@ function applyPalmBeachTimesMasthead(html: string): string {
   return `${MASTHEAD_OVERRIDE}\n${updated}`;
 }
 
+function validatePalmBeachTimesProductionHtml(html: string): string[] {
+  const errors: string[] = [];
+  if (html.length < 10000) errors.push("HTML is missing or too small");
+  for (const [marker, name] of [
+    ['data-layout="pbt-broadsheet-v6"', "v6 layout"],
+    ['data-skill-build="pbt-v6.0"', "v6 build"],
+    ['data-masthead="pbt-exact-graphical-v1"', "locked graphical masthead"],
+    ['data-masthead-source="locked-pbt-artwork"', "locked masthead artwork"],
+    ['class="todays-thread"', "Today's Thread"],
+    ['id="front-page"', "Front Page"],
+    ['id="weather-ocean"', "Weather & Ocean"],
+    ['id="money"', "Money"]
+  ]) {
+    if (!html.includes(marker)) errors.push(`Missing ${name}`);
+  }
+  return errors;
+}
+
+async function verifyPublishedPalmBeachTimes(env: Env, path: string) {
+  const response = await publisherRequest(env, path, {
+    method: "GET",
+    headers: { "Cache-Control": "no-cache" }
+  });
+  const html = await response.text();
+  const errors = response.ok ? validatePalmBeachTimesProductionHtml(html) : [`HTTP ${response.status}`];
+  return { ok: response.ok && errors.length === 0, status: response.status, htmlLength: html.length, errors };
+}
+
 const optionalDate = z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
   z
@@ -157,7 +186,7 @@ function createServer(env: Env) {
     "publish_newspaper",
     {
       description:
-        "Publish a completed Palm Beach Times HTML edition and return browser URLs for the dated edition and /today. The publisher automatically applies the classic Palm Beach Times blackletter masthead treatment.",
+        "Publish a validated Palm Beach Times v6 HTML edition through staged Publisher v2 upload, SHA-256 verification, and activation.",
       inputSchema: {
         date: z
           .string()
@@ -173,7 +202,9 @@ function createServer(env: Env) {
       try {
         requireAuthorizedUser(env);
         const publishToken = requirePublishToken(env);
-        const publishedHtml = applyPalmBeachTimesMasthead(html);
+        const preflightErrors = validatePalmBeachTimesProductionHtml(html);
+        if (preflightErrors.length) return textResult(`Publishing blocked: ${preflightErrors.join("; ")}`, true);
+        const publishedHtml = html;
 
         // Publisher v2 two-phase transfer. Raw UTF-8 bytes are staged in R2
         // and verified by SHA-256 before the dated edition is activated.
@@ -347,9 +378,8 @@ function createServer(env: Env) {
       try {
         requireAuthorizedUser(env);
 
-        if (!env.SLACK_WEBHOOK_URL) {
-          throw new Error("SLACK_WEBHOOK_URL is not configured");
-        }
+        if (!env.SLACK_BOT_TOKEN) throw new Error("SLACK_BOT_TOKEN is not configured");
+        if (!env.SLACK_CHANNEL_ID) throw new Error("SLACK_CHANNEL_ID is not configured");
 
         const resolvedDate = date ?? todayNewYork();
         const path = `/${resolvedDate}`;
@@ -368,18 +398,9 @@ function createServer(env: Env) {
           );
         }
 
-        if (!html || html.length < 10000) {
-          return textResult("Delivery blocked: published HTML is missing or too small", true);
-        }
-
-        if (
-          !html.includes('data-layout="pbt-broadsheet-v6"') ||
-          !html.includes('data-skill-build="pbt-v6.0"')
-        ) {
-          return textResult(
-            "Delivery blocked: published edition is missing required Palm Beach Times production markers",
-            true
-          );
+        const integrityErrors = validatePalmBeachTimesProductionHtml(html);
+        if (integrityErrors.length) {
+          return textResult(`Delivery blocked: ${integrityErrors.join("; ")}`, true);
         }
 
         const dedupeKey = `pbt-delivery:${resolvedDate}`;
@@ -406,19 +427,27 @@ function createServer(env: Env) {
         const emoji = weatherEmoji?.trim() || "🌴";
         const message = `Here is today’s paper ${emoji} 📰 ${publicUrl}`;
 
-        const slackResponse = await fetch(env.SLACK_WEBHOOK_URL, {
+        const slackResponse = await fetch("https://slack.com/api/chat.postMessage", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: message })
+          headers: {
+            Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`,
+            "Content-Type": "application/json; charset=utf-8"
+          },
+          body: JSON.stringify({
+            channel: env.SLACK_CHANNEL_ID,
+            text: message,
+            unfurl_links: false,
+            unfurl_media: false
+          })
         });
-
-        const slackBody = await slackResponse.text();
-
-        if (!slackResponse.ok || slackBody.trim().toLowerCase() !== "ok") {
-          return textResult(
-            `Slack delivery failed with HTTP ${slackResponse.status}: ${slackBody.slice(0, 300)}`,
-            true
-          );
+        let slackResult: { ok?: boolean; error?: string };
+        try {
+          slackResult = await slackResponse.json() as { ok?: boolean; error?: string };
+        } catch {
+          return textResult("Slack delivery failed: invalid JSON response", true);
+        }
+        if (!slackResponse.ok || !slackResult.ok) {
+          return textResult(`Slack delivery failed: ${slackResult.error || `HTTP ${slackResponse.status}`}`, true);
         }
 
         const deliveredAt = new Date().toISOString();
