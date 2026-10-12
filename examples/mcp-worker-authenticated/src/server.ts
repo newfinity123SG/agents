@@ -150,7 +150,7 @@ const optionalDate = z.preprocess(
 function createServer(env: Env) {
   const server = new McpServer({
     name: "Palm Beach Times Publisher",
-    version: "2.2.0"
+    version: "2.4.0"
   });
 
   server.registerTool(
@@ -175,34 +175,87 @@ function createServer(env: Env) {
         const publishToken = requirePublishToken(env);
         const publishedHtml = applyPalmBeachTimesMasthead(html);
 
-        const response = await publisherRequest(env, "/api/publish", {
+        // Publisher v2 two-phase transfer. Raw UTF-8 bytes are staged in R2
+        // and verified by SHA-256 before the dated edition is activated.
+        // Note: the legacy MCP input still carries full HTML; callers with
+        // tool-argument size limits need a separate upload transport.
+        const bytes = new TextEncoder().encode(publishedHtml);
+        const digestBytes = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+        const sha256 = [...digestBytes]
+          .map((byte) => byte.toString(16).padStart(2, "0"))
+          .join("");
+
+        const stageResponse = await publisherRequest(env, "/api/stage", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${publishToken}`,
+            "Content-Type": "text/html; charset=utf-8",
+            "x-edition-date": date,
+            "x-edition-title": title,
+            "x-edition-type": editionType,
+            "x-content-sha256": sha256
+          },
+          body: publishedHtml
+        });
+        const stageBody = await stageResponse.text();
+        if (!stageResponse.ok) {
+          return textResult(
+            `Staging failed with HTTP ${stageResponse.status}: ${stageBody}`,
+            true
+          );
+        }
+        let staged: Record<string, unknown>;
+        try {
+          staged = JSON.parse(stageBody) as Record<string, unknown>;
+        } catch {
+          return textResult("Staging returned invalid JSON", true);
+        }
+        if (staged.ok !== true || staged.sha256 !== sha256 || staged.bytes !== bytes.byteLength) {
+          return textResult("Staging failed integrity confirmation", true);
+        }
+
+        const response = await publisherRequest(env, "/api/activate", {
           method: "POST",
           headers: {
             Authorization: `Bearer ${publishToken}`,
             "Content-Type": "application/json"
           },
-          body: JSON.stringify({
-            date,
-            html: publishedHtml,
-            title,
-            editionType
-          })
+          body: JSON.stringify({ date, sha256 })
         });
-
         const body = await response.text();
         if (!response.ok) {
           return textResult(
-            `Publishing failed with HTTP ${response.status}: ${body}`,
+            `Activation failed with HTTP ${response.status}: ${body}`,
             true
           );
         }
 
-        let result: Record<string, unknown> = {};
+        let result: Record<string, unknown>;
         try {
           result = JSON.parse(body) as Record<string, unknown>;
         } catch {
-          // Public URLs are synthesized below because the service binding
-          // invokes the publisher using an internal hostname.
+          return textResult("Activation returned invalid JSON", true);
+        }
+        if (result.ok !== true || result.sha256 !== sha256 || result.bytes !== bytes.byteLength) {
+          return textResult("Activation failed integrity confirmation", true);
+        }
+        for (const checkPath of [`/${date}`, "/today"]) {
+          const verify = await publisherRequest(env, checkPath, {
+            method: "GET",
+            headers: { "Cache-Control": "no-cache" }
+          });
+          if (!verify.ok) {
+            return textResult(`Publication verification failed for ${checkPath}: HTTP ${verify.status}`, true);
+          }
+          const fetched = new Uint8Array(await verify.arrayBuffer());
+          if (fetched.byteLength !== bytes.byteLength) {
+            return textResult(`Publication verification failed for ${checkPath}: byte mismatch`, true);
+          }
+          const verifiedDigest = new Uint8Array(await crypto.subtle.digest("SHA-256", fetched));
+          const verifiedSha = [...verifiedDigest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+          if (verifiedSha !== sha256) {
+            return textResult(`Publication verification failed for ${checkPath}: SHA-256 mismatch`, true);
+          }
         }
 
         return textResult(
