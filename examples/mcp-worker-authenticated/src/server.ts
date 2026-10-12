@@ -179,7 +179,7 @@ const optionalDate = z.preprocess(
 function createServer(env: Env) {
   const server = new McpServer({
     name: "Palm Beach Times Publisher",
-    version: "2.4.1"
+    version: "2.4.2"
   });
 
   server.registerTool(
@@ -484,7 +484,7 @@ function createServer(env: Env) {
     "deliver_newspaper",
     {
       description:
-        "Verify a published Palm Beach Times edition and deliver its cache-busted dated URL through the dedicated Palm Beach Times Slack bot. Delivery is idempotent by edition date unless force=true.",
+        "Verify a published Palm Beach Times edition and deliver its cache-busted dated URL through the dedicated Palm Beach Times Slack bot. Delivery is idempotent by edition date and channel unless force=true.",
       inputSchema: {
         date: optionalDate,
         weatherEmoji: z.string().min(1).max(8).optional(),
@@ -496,7 +496,7 @@ function createServer(env: Env) {
         requireAuthorizedUser(env);
 
         if (!env.SLACK_BOT_TOKEN) throw new Error("SLACK_BOT_TOKEN is not configured");
-        if (!env.SLACK_CHANNEL_ID) throw new Error("SLACK_CHANNEL_ID is not configured");
+        if (env.SLACK_CHANNEL_ID !== "C0BTU2G3LNS") throw new Error("Delivery blocked: SLACK_CHANNEL_ID must be the verified #personal-flo channel C0BTU2G3LNS");
 
         const resolvedDate = date ?? todayNewYork();
         const path = `/${resolvedDate}`;
@@ -520,7 +520,7 @@ function createServer(env: Env) {
           return textResult(`Delivery blocked: ${integrityErrors.join("; ")}`, true);
         }
 
-        const dedupeKey = `pbt-delivery:${resolvedDate}`;
+        const dedupeKey = `pbt-delivery:${resolvedDate}:${env.SLACK_CHANNEL_ID}`;
         const prior = await env.OAUTH_KV.get(dedupeKey);
 
         if (prior && !force) {
@@ -531,6 +531,7 @@ function createServer(env: Env) {
                 delivered: false,
                 deduped: true,
                 date: resolvedDate,
+                channel: env.SLACK_CHANNEL_ID,
                 priorDelivery: JSON.parse(prior)
               },
               null,
@@ -557,9 +558,9 @@ function createServer(env: Env) {
             unfurl_media: false
           })
         });
-        let slackResult: { ok?: boolean; error?: string };
+        let slackResult: { ok?: boolean; error?: string; channel?: string; ts?: string };
         try {
-          slackResult = await slackResponse.json() as { ok?: boolean; error?: string };
+          slackResult = await slackResponse.json() as { ok?: boolean; error?: string; channel?: string; ts?: string };
         } catch {
           return textResult("Slack delivery failed: invalid JSON response", true);
         }
@@ -567,10 +568,13 @@ function createServer(env: Env) {
           return textResult(`Slack delivery failed: ${slackResult.error || `HTTP ${slackResponse.status}`}`, true);
         }
 
+        if (slackResult.channel !== env.SLACK_CHANNEL_ID || !slackResult.ts) {
+          return textResult("Slack delivery unverified: missing or mismatched channel/message receipt; inspect Slack before retrying", true);
+        }
         const deliveredAt = new Date().toISOString();
         await env.OAUTH_KV.put(
           dedupeKey,
-          JSON.stringify({ deliveredAt, url: publicUrl }),
+          JSON.stringify({ deliveredAt, url: publicUrl, channel: slackResult.channel, messageTs: slackResult.ts }),
           { expirationTtl: 60 * 60 * 24 * 14 }
         );
 
@@ -582,6 +586,8 @@ function createServer(env: Env) {
               deduped: false,
               date: resolvedDate,
               deliveredAt,
+              channel: slackResult.channel,
+              messageTs: slackResult.ts,
               url: publicUrl
             },
             null,
