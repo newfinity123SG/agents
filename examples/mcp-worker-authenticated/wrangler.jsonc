@@ -7,7 +7,8 @@
   "main": "src/server.ts",
   "keep_vars": true,
   "vars": {
-    "ALLOWED_GITHUB_LOGIN": "newfinity123SG"
+    "ALLOWED_GITHUB_LOGIN": "newfinity123SG",
+    "SLACK_CHANNEL_ID": "C0BTU2G3LNS"
   },
   "assets": {
     "not_found_handling": "single-page-application",
