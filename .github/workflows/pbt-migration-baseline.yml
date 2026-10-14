@@ -18,7 +18,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Compile original scripts
         run: python -m compileall -q scripts tests
-      - name: Run source and validator tests
+      - name: Run original template and publishing verifier tests
         run: python -m unittest discover -s tests -v
+      - name: Check isolated staging worker syntax
+        run: node --check staging/src/worker.js
+      - name: Reject production bucket binding or cron in staging
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          config = Path("staging/wrangler.toml").read_text()
+          assert 'bucket_name = "palm-beach-times-staging"' in config
+          assert 'bucket_name = "palm-beach-times"' not in config
+          assert "[triggers]" not in config and "crons =" not in config
+          source = Path("staging/src/worker.js").read_text()
+          assert "slack.com/api" not in source.lower()
+          assert "scheduler" not in source.split("export default")[0].lower()
+          print("Staging isolation checks passed")
+          PY
