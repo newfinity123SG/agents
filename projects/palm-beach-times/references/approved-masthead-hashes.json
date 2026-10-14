@@ -1,0 +1,18 @@
+{
+  "reference_edition": "2026-10-10",
+  "source": "User's saved Palm_Beach_Times_2026-10-10.html Library file",
+  "published_embedded_masthead": {
+    "sha256": "64230f7aec8aa47280de083797bbed8e2854d22cd909f5aaf3e033578fe2f18e",
+    "bytes": 277319,
+    "dimensions": [700,233],
+    "png_alpha_color_type": 6
+  },
+  "standalone_library_masthead": {
+    "sha256": "4d6879de0de4e488c9e86731c9356c30e593f5e0a811dcff9e5e88bd85ff8bb7",
+    "bytes": 2472836,
+    "dimensions": [2048,682],
+    "png_alpha_color_type": 6
+  },
+  "status": "Distinct assets; never replace an edition's embedded masthead with the standalone PNG without visual approval",
+  "provenance": "Exact embedded PNG recovered via HTML image data URI base64, no re-encoding"
+}
