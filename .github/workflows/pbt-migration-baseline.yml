@@ -29,6 +29,8 @@ jobs:
         run: node --check staging/src/worker.js
       - name: Run local staging Publisher integration tests
         run: node --test staging/tests/worker.test.mjs
+      - name: Check OpenAI orchestration probe syntax
+        run: node --check orchestrator-staging/src/worker.js
       - name: Reject production bucket binding or cron in staging
         run: |
           python - <<'PY'
