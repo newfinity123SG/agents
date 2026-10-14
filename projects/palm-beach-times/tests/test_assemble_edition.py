@@ -22,7 +22,7 @@ class AssemblyContractTests(unittest.TestCase):
 
     def test_unrecognized_field_fails(self):
         with self.assertRaisesRegex(ValueError, "Unknown template fields"):
-            assemble(dict.fromkeys(self.required, "test") | {"EXTRA_FIELD": "test"}, self.template)
+            assemble(dict.fromkeys(self.required, "test") | {"DATE_ISO": "2026-10-14", "EXTRA_FIELD": "test"}, self.template)
 
     def test_invalid_date_fails(self):
         with self.assertRaises((ValueError, TypeError)):
