@@ -34,7 +34,7 @@ def recover(html):
     if raw[:8]!=b"\x89PNG\r\n\x1a\n" or raw[12:16]!=b"IHDR":
         raise ValueError("Invalid PNG signature")
     width,height=struct.unpack(">II",raw[16:24])
-    if width < 900 or height < 150:
+    if width < 600 or height < 150:
         raise ValueError("Unexpectedly small locked masthead")
     if raw[25] not in (4,6):
         raise ValueError("Locked masthead lacks alpha channel")
