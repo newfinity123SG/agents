@@ -1,0 +1,24 @@
+name: Palm Beach Times Migration Baseline
+on:
+  push:
+    branches:
+      - feature/pbt-cloudflare-shadow-migration
+    paths:
+      - projects/palm-beach-times/**
+      - .github/workflows/pbt-migration-baseline.yml
+  workflow_dispatch:
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: projects/palm-beach-times
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile original scripts
+        run: python -m compileall -q scripts tests
+      - name: Run source and validator tests
+        run: python -m unittest discover -s tests -v
