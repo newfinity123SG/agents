@@ -1,13 +1,14 @@
 // Palm Beach Times historical local source diagnostic.
 // URLs below are candidates, not approved feeds. Performs no AI requests or publishing.
 export const CANDIDATES=[
-  {domain:"wptv.com",section:"local-news",url:"https://www.wptv.com/feeds/rss",kind:"rss_candidate"},
+  {domain:"wptv.com",section:"local-news",url:"https://www.wptv.com/news/local-news/southern-palm-beach-county.rss",kind:"rss_candidate"},
   {domain:"wpbf.com",section:"local-news",url:"https://www.wpbf.com/rss",kind:"rss_candidate"},
   {domain:"bocamag.com",section:"local",url:"https://www.bocamag.com/feed/",kind:"rss_candidate"},
   {domain:"bocapost.com",section:"local-news",url:"https://www.bocapost.com/feed/",kind:"rss_candidate"},
-  {domain:"myboca.us",section:"local",url:"https://www.myboca.us/RSSFeed.aspx",kind:"rss_candidate"},
-  {domain:"delraybeachfl.gov",section:"local",url:"https://www.delraybeachfl.gov/",kind:"site_reachability"},
-  {domain:"wpb.org",section:"local",url:"https://www.wpb.org/",kind:"site_reachability"},
+  {domain:"myboca.us",section:"local",url:"https://www.myboca.us/rss.aspx",kind:"rss_candidate"},
+  {domain:"delraybeachfl.gov",section:"local",url:"https://www.delraybeachfl.gov/government/city-manager/media-communications-office/city-news",kind:"site_reachability"},
+  {domain:"wpb.org",section:"local",url:"https://www.wpb.org/Residents/Community-Events/Events",kind:"site_reachability"},
+  {domain:"delraybeach.legistar.com",section:"community-issues",url:"https://delraybeach.legistar.com/Calendar.aspx",kind:"site_reachability"},
   {domain:"thecoastalstar.com",section:"local",url:"https://www.thecoastalstar.com/",kind:"site_reachability"}
 ];
 async function check(candidate) {
@@ -32,7 +33,7 @@ async function check(candidate) {
   return {domain:candidate.domain,section:candidate.section,kind:candidate.kind,
    url:candidate.url,httpStatus:r.status,finalHost:final.hostname,
    contentType:type.slice(0,80),rssOrAtomDetected:feed,
-   result:available?"reachable_candidate":r.ok?"not_a_feed":"http_blocked",
+   result:available?"reachable_candidate":r.ok?"not_a_feed":r.status===404?"missing_endpoint":r.status===403||r.status===451?"access_restricted":r.status===526?"tls_failure":"http_error",
    elapsedMs:Date.now()-started,automated:false};
  } catch(e){
   return {domain:candidate.domain,section:candidate.section,kind:candidate.kind,url:candidate.url,
