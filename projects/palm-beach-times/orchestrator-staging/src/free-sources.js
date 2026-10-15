@@ -39,7 +39,7 @@ async function weather(now){
     if(!periods.length)throw new Error("Missing forecast periods");
     const updated=data.properties?.updateTime||null;
     const hours=updated?(now-Date.parse(updated))/3600000:null;
-    return {status:hours!==null&&hours>=0&&hours<=12?"ok":"stale",
+    return {status:hours!==null&&hours>=-0.05&&hours<=12?"ok":"stale",
       updated,ageHours:hours===null?null:Math.round(hours*10)/10,source:endpoint,
       periods:periods.map(p=>({name:p.name,startTime:p.startTime,endTime:p.endTime,temperature:p.temperature,temperatureUnit:p.temperatureUnit,shortForecast:p.shortForecast,windSpeed:p.windSpeed}))};
   }catch(e){return {status:"unavailable",reason:String(e.message).slice(0,100),source:url};}
