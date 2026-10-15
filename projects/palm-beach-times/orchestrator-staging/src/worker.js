@@ -59,15 +59,15 @@ export default {
     // Use background mode: Cloudflare should not wait for a long model/research run.
     const date=new Date().toISOString().slice(0,10);
     const body={model:MODEL,background:true,store:true,
-      tools:[SKILL,{type:"web_search"}],max_output_tokens:4200,
+      tools:[SKILL,{type:"web_search"}],max_output_tokens:7000,
       input:`Staging research-only trial for The Palm Beach Times, UTC date ${date}.
 Read the personal-morning-newspaper Skill instructions and preserve the original broadsheet v6 layout requirements.
-Use live web research to create a source-backed editorial planning brief, NOT a publishable edition.
+Use live web research to create a STRICTLY CONCISE source-backed editorial planning brief, NOT a publishable edition. Limit research to the minimum needed; do not crawl or repeatedly search the same sources.
 Provide 3 sourced news items, 2 sourced AI/technology items, 3 specific Palm Beach/Boca-area local happenings, current weather-source references, and source provenance for US 10Y, Freddie 30Y, BTC and major index charts.
-For each claim include source URL, the publication or observation date, and any retrieval limitations. Explicitly identify data that cannot be verified, missing licensed intraday OHLCV records, and any unavailable comic-image tooling.
+For each claim include ONE source URL, date, and a brief limitation (max 35 words per item). The entire final brief MUST be under 1800 words. Do not expose intermediate research notes or repeat layout rules. Explicitly identify data that cannot be verified, missing licensed intraday OHLCV records, and any unavailable comic-image tooling.
 Do NOT invent events, numerical quotes, times, market chart series, source URLs, masthead replacements or illustrations.
 Do NOT write files, call a Publisher, contact Slack, generate images, publish an edition or change schedules.
-Finish with a gap list and an evidence-based go/no-go recommendation for proceeding to a complete v6 HTML generation test.`};
+Finish with at most four brief gaps and a GO/NO-GO recommendation. Incomplete source coverage means NO-GO.`};
     const r=await openai("",env,body);if(r.failed)return r.failed;
     return json({ok:true,id:r.data.id,status:r.data.status,editorialTrial:true,
       polling:"GET /api/editorial-status?id="+encodeURIComponent(r.data.id),
