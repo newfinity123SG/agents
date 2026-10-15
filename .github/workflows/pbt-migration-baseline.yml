@@ -31,6 +31,10 @@ jobs:
         run: node --test staging/tests/worker.test.mjs
       - name: Check OpenAI orchestration probe syntax
         run: node --check orchestrator-staging/src/worker.js
+      - name: Check free-source module and tests
+        run: |
+          node --check orchestrator-staging/src/free-sources.js
+          node --test orchestrator-staging/tests/free-sources.test.mjs
       - name: Reject production bucket binding or cron in staging
         run: |
           python - <<'PY'
