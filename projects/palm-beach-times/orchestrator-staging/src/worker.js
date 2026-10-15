@@ -1,3 +1,4 @@
+import {inspectLocalSources} from "./local-source-diagnostic.js";
 import {collectFreeSources} from "./free-sources.js";
 // Palm Beach Times: staging-only OpenAI Skill probe and editorial research trial.
 // No publishing, R2 writes, Slack calls, crons, or production credentials.
@@ -38,12 +39,14 @@ export default {
     if(req.method==="GET"&&url.pathname==="/health")
       return json({ok:true,service:"pbt-openai-orchestrator-staging",publishing:false,slack:false,
         scheduler:false,skillId:SKILL_ID,skillVersion:VERSION,editorialTrial:true});
+    const local=req.method==="GET"&&url.pathname==="/api/local-source-diagnostic";
     const free=req.method==="GET"&&url.pathname==="/api/free-sources";
     const probe=req.method==="POST"&&url.pathname==="/api/skill-probe";
     const draft=req.method==="POST"&&url.pathname==="/api/editorial-trial";
     const status=req.method==="GET"&&url.pathname==="/api/editorial-status";
-    if(!free&&!probe&&!draft&&!status)return json({ok:false,error:"Not found"},404);
+    if(!local&&!free&&!probe&&!draft&&!status)return json({ok:false,error:"Not found"},404);
     if(!authorized(req,env))return json({ok:false,error:"Unauthorized"},401);
+    if(local)return json(await inspectLocalSources());
     if(free)return json(await collectFreeSources(env));
     if(!env.OPENAI_API_KEY)return json({ok:false,error:"Missing OPENAI_API_KEY secret"},503);
     if(status){
