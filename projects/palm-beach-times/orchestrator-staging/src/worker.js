@@ -1,3 +1,4 @@
+import {runExtraction} from "./extraction-diagnostic.js";
 import {inspectLocalSources} from "./local-source-diagnostic.js";
 import {collectFreeSources} from "./free-sources.js";
 // Palm Beach Times: staging-only OpenAI Skill probe and editorial research trial.
@@ -39,13 +40,15 @@ export default {
     if(req.method==="GET"&&url.pathname==="/health")
       return json({ok:true,service:"pbt-openai-orchestrator-staging",publishing:false,slack:false,
         scheduler:false,skillId:SKILL_ID,skillVersion:VERSION,editorialTrial:true});
+    const extraction=req.method==="GET"&&url.pathname==="/api/extraction-diagnostic";
     const local=req.method==="GET"&&url.pathname==="/api/local-source-diagnostic";
     const free=req.method==="GET"&&url.pathname==="/api/free-sources";
     const probe=req.method==="POST"&&url.pathname==="/api/skill-probe";
     const draft=req.method==="POST"&&url.pathname==="/api/editorial-trial";
     const status=req.method==="GET"&&url.pathname==="/api/editorial-status";
-    if(!local&&!free&&!probe&&!draft&&!status)return json({ok:false,error:"Not found"},404);
+    if(!extraction&&!local&&!free&&!probe&&!draft&&!status)return json({ok:false,error:"Not found"},404);
     if(!authorized(req,env))return json({ok:false,error:"Unauthorized"},401);
+    if(extraction)return json(await runExtraction());
     if(local)return json(await inspectLocalSources());
     if(free)return json(await collectFreeSources(env));
     if(!env.OPENAI_API_KEY)return json({ok:false,error:"Missing OPENAI_API_KEY secret"},503);
