@@ -33,6 +33,7 @@ jobs:
         run: node --check orchestrator-staging/src/worker.js
       - name: Check free-source module and tests
         run: |
+          node --check orchestrator-staging/src/extraction-diagnostic.js
           node --check orchestrator-staging/src/local-source-diagnostic.js
           node --check orchestrator-staging/src/free-sources.js
           node --test orchestrator-staging/tests/free-sources.test.mjs
