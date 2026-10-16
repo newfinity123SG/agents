@@ -33,6 +33,8 @@ jobs:
         run: node --check orchestrator-staging/src/worker.js
       - name: Check free-source module and tests
         run: |
+          node --check orchestrator-staging/src/v6-editorial-bridge.js
+          node --test orchestrator-staging/src/v6-editorial-bridge.test.mjs
           node --check orchestrator-staging/src/editorial-output-validator.js
           node --test orchestrator-staging/src/editorial-output-validator.test.mjs
           node --check orchestrator-staging/src/editorial-package.js
