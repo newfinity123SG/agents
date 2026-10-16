@@ -1,0 +1,59 @@
+name: Palm Beach Times Migration Baseline
+on:
+  push:
+    branches:
+      - feature/pbt-cloudflare-shadow-migration
+    paths:
+      - projects/palm-beach-times/**
+      - .github/workflows/pbt-migration-baseline.yml
+  workflow_dispatch:
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: projects/palm-beach-times
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Compile original scripts
+        run: python -m compileall -q scripts tests
+      - name: Run original template and publishing verifier tests
+        run: python -m unittest discover -s tests -v
+      - name: Check isolated staging worker syntax
+        run: node --check staging/src/worker.js
+      - name: Run local staging Publisher integration tests
+        run: node --test staging/tests/worker.test.mjs
+      - name: Check OpenAI orchestration probe syntax
+        run: node --check orchestrator-staging/src/worker.js
+      - name: Check free-source module and tests
+        run: |
+          node --check orchestrator-staging/src/v6-editorial-bridge.js
+          node --test orchestrator-staging/src/v6-editorial-bridge.test.mjs
+          node --check orchestrator-staging/src/editorial-output-validator.js
+          node --test orchestrator-staging/src/editorial-output-validator.test.mjs
+          node --check orchestrator-staging/src/editorial-package.js
+          node --test orchestrator-staging/src/editorial-package.test.mjs
+          node --check orchestrator-staging/src/shadow-quality.js
+          node --check orchestrator-staging/src/extraction-diagnostic.js
+          node --check orchestrator-staging/src/local-source-diagnostic.js
+          node --check orchestrator-staging/src/free-sources.js
+          node --test orchestrator-staging/tests/free-sources.test.mjs
+      - name: Reject production bucket binding or cron in staging
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          config = Path("staging/wrangler.toml").read_text()
+          assert 'bucket_name = "palm-beach-times-staging"' in config
+          assert 'bucket_name = "palm-beach-times"' not in config
+          assert "[triggers]" not in config and "crons =" not in config
+          source = Path("staging/src/worker.js").read_text()
+          assert "slack.com/api" not in source.lower()
+          assert "scheduler" not in source.split("export default")[0].lower()
+          print("Staging isolation checks passed")
+          PY
