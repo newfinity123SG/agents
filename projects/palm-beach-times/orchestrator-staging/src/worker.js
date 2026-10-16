@@ -42,6 +42,7 @@ export default {
     if(req.method==="GET"&&url.pathname==="/health")
       return json({ok:true,service:"pbt-openai-orchestrator-staging",publishing:false,slack:false,
         scheduler:false,skillId:SKILL_ID,skillVersion:VERSION,editorialTrial:true});
+    const boundedEditorial=req.method==="POST"&&url.pathname==="/api/bounded-editorial-trial";
     const packageRequest=req.method==="POST"&&url.pathname==="/api/editorial-package";
     const quality=req.method==="POST"&&url.pathname==="/api/shadow-quality";
     const extraction=req.method==="GET"&&url.pathname==="/api/extraction-diagnostic";
@@ -50,8 +51,32 @@ export default {
     const probe=req.method==="POST"&&url.pathname==="/api/skill-probe";
     const draft=req.method==="POST"&&url.pathname==="/api/editorial-trial";
     const status=req.method==="GET"&&url.pathname==="/api/editorial-status";
-    if(!packageRequest&&!quality&&!extraction&&!local&&!free&&!probe&&!draft&&!status)return json({ok:false,error:"Not found"},404);
+    if(!boundedEditorial&&!packageRequest&&!quality&&!extraction&&!local&&!free&&!probe&&!draft&&!status)return json({ok:false,error:"Not found"},404);
     if(!authorized(req,env))return json({ok:false,error:"Unauthorized"},401);
+    if(boundedEditorial){
+      // Explicitly opt-in to a paid call. This endpoint never invokes web search, tools, publishing or Slack.
+      if(req.headers.get("X-Allow-Model-Call")!=="yes")
+        return json({ok:false,error:"Paid model call requires X-Allow-Model-Call: yes"},412);
+      const size=Number(req.headers.get("content-length")||0);
+      if(size>131072)return json({ok:false,error:"Input too large"},413);
+      let raw;try{raw=await req.text();if(raw.length>131072)return json({ok:false,error:"Input too large"},413);}
+      catch{return json({ok:false,error:"Unable to read input"},400);}
+      let input;try{input=JSON.parse(raw);}catch{return json({ok:false,error:"Invalid JSON"},400);}
+      const packed=buildEditorialPackage(input);
+      if(!packed.ok)return json({ok:false,error:"Invalid source package",details:packed.errors},400);
+      if(!packed.readyForEditorialTrial)return json({ok:false,error:"Insufficient verified source coverage",
+        accepted:packed.accepted,gaps:packed.gaps,rejected:packed.rejected},422);
+      if(packed.payloadBytes>42000)return json({ok:false,error:"Source package exceeds editorial input budget",
+        bytes:packed.payloadBytes},413);
+      if(!env.OPENAI_API_KEY)return json({ok:false,error:"Missing OPENAI_API_KEY secret"},503);
+      const trial={model:MODEL,max_output_tokens:2600,
+        input:"Nonpublishing editorial test for The Palm Beach Times. Use ONLY the following source-backed package. Do not browse, use tools, access files, publish, or contact Slack. Return concise JSON with keys: editionDate, desks, conflicts, gaps. desks is an object keyed by supplied desk names; each chosen story must contain title, summary (maximum 65 words), url, and publishedAt from the provided package. Do not invent claims, dates, quotes or numerical data. Reject contradictions as conflicts. Total 12 to 20 stories across available desks, no repeated URLs. If insufficient evidence, return fewer and explain gaps.\nPACKAGE:\n"+JSON.stringify(packed.package)};
+      const r=await openai("",env,trial);if(r.failed)return r.failed;
+      const normalized=normalize(r.data,16000);
+      return json({...normalized,mode:"bounded-editorial-trial",sourceCount:packed.accepted,
+        packageBytes:packed.payloadBytes,requiresManifestValidation:true,modelTokens:normalized.usage?.total_tokens??null,
+        publication:"DISABLED",delivery:"DISABLED"});
+    }
     if(packageRequest){
       const size=Number(req.headers.get("content-length")||0);
       if(size>131072)return json({ok:false,error:"Input too large"},413);
