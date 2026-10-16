@@ -1,3 +1,4 @@
+import {evaluateShadowEdition} from "./shadow-quality.js";
 import {runExtraction} from "./extraction-diagnostic.js";
 import {inspectLocalSources} from "./local-source-diagnostic.js";
 import {collectFreeSources} from "./free-sources.js";
@@ -40,14 +41,23 @@ export default {
     if(req.method==="GET"&&url.pathname==="/health")
       return json({ok:true,service:"pbt-openai-orchestrator-staging",publishing:false,slack:false,
         scheduler:false,skillId:SKILL_ID,skillVersion:VERSION,editorialTrial:true});
+    const quality=req.method==="POST"&&url.pathname==="/api/shadow-quality";
     const extraction=req.method==="GET"&&url.pathname==="/api/extraction-diagnostic";
     const local=req.method==="GET"&&url.pathname==="/api/local-source-diagnostic";
     const free=req.method==="GET"&&url.pathname==="/api/free-sources";
     const probe=req.method==="POST"&&url.pathname==="/api/skill-probe";
     const draft=req.method==="POST"&&url.pathname==="/api/editorial-trial";
     const status=req.method==="GET"&&url.pathname==="/api/editorial-status";
-    if(!extraction&&!local&&!free&&!probe&&!draft&&!status)return json({ok:false,error:"Not found"},404);
+    if(!quality&&!extraction&&!local&&!free&&!probe&&!draft&&!status)return json({ok:false,error:"Not found"},404);
     if(!authorized(req,env))return json({ok:false,error:"Unauthorized"},401);
+    if(quality){
+      const size=Number(req.headers.get("content-length")||0);
+      if(size>65536)return json({ok:false,error:"Manifest too large"},413);
+      let raw;try{raw=await req.text();if(raw.length>65536)return json({ok:false,error:"Manifest too large"},413);}
+      catch{return json({ok:false,error:"Unable to read manifest"},400);}
+      let manifest;try{manifest=JSON.parse(raw);}catch{return json({ok:false,error:"Invalid JSON"},400);}
+      return json(evaluateShadowEdition(manifest));
+    }
     if(extraction)return json(await runExtraction());
     if(local)return json(await inspectLocalSources());
     if(free)return json(await collectFreeSources(env));
