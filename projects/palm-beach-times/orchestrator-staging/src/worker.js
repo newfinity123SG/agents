@@ -1,3 +1,4 @@
+import {validateEditorialDraft} from "./editorial-output-validator.js";
 import {buildEditorialPackage} from "./editorial-package.js";
 import {evaluateShadowEdition} from "./shadow-quality.js";
 import {runExtraction} from "./extraction-diagnostic.js";
@@ -42,6 +43,7 @@ export default {
     if(req.method==="GET"&&url.pathname==="/health")
       return json({ok:true,service:"pbt-openai-orchestrator-staging",publishing:false,slack:false,
         scheduler:false,skillId:SKILL_ID,skillVersion:VERSION,editorialTrial:true});
+    const draftValidate=req.method==="POST"&&url.pathname==="/api/validate-editorial-draft";
     const boundedEditorial=req.method==="POST"&&url.pathname==="/api/bounded-editorial-trial";
     const packageRequest=req.method==="POST"&&url.pathname==="/api/editorial-package";
     const quality=req.method==="POST"&&url.pathname==="/api/shadow-quality";
@@ -51,8 +53,16 @@ export default {
     const probe=req.method==="POST"&&url.pathname==="/api/skill-probe";
     const draft=req.method==="POST"&&url.pathname==="/api/editorial-trial";
     const status=req.method==="GET"&&url.pathname==="/api/editorial-status";
-    if(!boundedEditorial&&!packageRequest&&!quality&&!extraction&&!local&&!free&&!probe&&!draft&&!status)return json({ok:false,error:"Not found"},404);
+    if(!draftValidate&&!boundedEditorial&&!packageRequest&&!quality&&!extraction&&!local&&!free&&!probe&&!draft&&!status)return json({ok:false,error:"Not found"},404);
     if(!authorized(req,env))return json({ok:false,error:"Unauthorized"},401);
+    if(draftValidate){
+      const size=Number(req.headers.get("content-length")||0);
+      if(size>131072)return json({ok:false,error:"Input too large"},413);
+      let raw;try{raw=await req.text();if(raw.length>131072)return json({ok:false,error:"Input too large"},413);}catch{return json({ok:false,error:"Unable to read input"},400);}
+      let input;try{input=JSON.parse(raw);}catch{return json({ok:false,error:"Invalid JSON"},400);}
+      const result=validateEditorialDraft(input?.draft,input?.sourcePackage);
+      return json(result,result.pass?200:422);
+    }
     if(boundedEditorial){
       // Explicitly opt-in to a paid call. This endpoint never invokes web search, tools, publishing or Slack.
       if(req.headers.get("X-Allow-Model-Call")!=="yes")
