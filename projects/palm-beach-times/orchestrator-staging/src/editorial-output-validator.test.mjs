@@ -1,0 +1,11 @@
+import test from "node:test";import assert from "node:assert/strict";
+import {validateEditorialDraft} from "./editorial-output-validator.js";
+const source={editionDate:"2026-10-16",candidates:[{desk:"local",title:"City report",url:"https://example.gov/article?utm_source=test",publishedAt:"2026-10-16T10:00:00.000Z",evidenceUrl:"https://example.gov/article",source:"City"}]};
+const item={title:"City report",summary:"A short sourced report.",url:"https://example.gov/article",publishedAt:"2026-10-16T10:00:00.000Z"};
+const draft={editionDate:"2026-10-16",desks:{local:[item]}};
+test("accepts citations bound to source",()=>{const r=validateEditorialDraft(draft,source);assert.equal(r.pass,true);assert.equal(r.stories[0].source,"City");});
+test("rejects invented link",()=>assert.equal(validateEditorialDraft({...draft,desks:{local:[{...item,url:"https://other.com/fake"}]}},source).pass,false));
+test("rejects invented date",()=>assert.equal(validateEditorialDraft({...draft,desks:{local:[{...item,publishedAt:"2026-10-15"}]}},source).pass,false));
+test("rejects duplicated references",()=>assert.equal(validateEditorialDraft({...draft,desks:{local:[item,item]}},source).pass,false));
+test("rejects excessive summary",()=>assert.equal(validateEditorialDraft({...draft,desks:{local:[{...item,summary:"word ".repeat(70)}]}},source).pass,false));
+test("rejects changed edition date",()=>assert.equal(validateEditorialDraft({...draft,editionDate:"2026-10-15"},source).pass,false));
