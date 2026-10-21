@@ -36,3 +36,36 @@ test('legacy health behavior unchanged',async()=>{
  const r=await worker.fetch(new Request('https://staging.invalid/health'),env);
  const j=await r.json();assert.equal(j.version,2);assert.equal(j.service,'palm-beach-times-publisher');
 });
+
+test('manifest rejects incomplete checkpoint without publication',async()=>{
+ const date='2026-10-21';
+ const cp={schema:'pbt-edition-checkpoint-v1',editionDate:date,storageVerified:false,artifacts:{}};
+ const data=new TextEncoder().encode(JSON.stringify(cp));
+ const sha=Buffer.from(await crypto.subtle.digest('SHA-256',data)).toString('hex');
+ await bucket.put('recovery/'+date+'/checkpoint/'+sha,data);
+ const url='https://staging.invalid/api/recovery-manifest?date='+date+'&sha256='+sha;
+ const res=await worker.fetch(new Request(url,{headers:{Authorization:headers.Authorization}}),env);
+ assert.equal(res.status,409);
+ assert.equal((await res.json()).state,'incomplete');
+});
+test('manifest requires all authentic assets and detects tampering',async()=>{
+ const date='2026-10-21', artifacts={};
+ for(const name of ['html','comic','market_input','masthead']){
+  const data=new TextEncoder().encode('fixture-'+name);
+  const sha256=Buffer.from(await crypto.subtle.digest('SHA-256',data)).toString('hex');
+  await bucket.put('recovery/'+date+'/'+name+'/'+sha256,data);
+  artifacts[name]={sha256,bytes:data.byteLength};
+ }
+ const cp={schema:'pbt-edition-checkpoint-v1',editionDate:date,storageVerified:true,artifacts};
+ const data=new TextEncoder().encode(JSON.stringify(cp));
+ const sha=Buffer.from(await crypto.subtle.digest('SHA-256',data)).toString('hex');
+ await bucket.put('recovery/'+date+'/checkpoint/'+sha,data);
+ const url='https://staging.invalid/api/recovery-manifest?date='+date+'&sha256='+sha;
+ const req=()=>new Request(url,{headers:{Authorization:headers.Authorization}});
+ const result=await worker.fetch(req(),env);
+ assert.equal(result.status,200);
+ assert.equal((await result.json()).state,'complete');
+ await bucket.put('recovery/'+date+'/comic/'+artifacts.comic.sha256,new TextEncoder().encode('bad'));
+ const tampered=await worker.fetch(req(),env);
+ assert.equal(tampered.status,409);
+});
