@@ -1,0 +1,79 @@
+openapi: 3.1.0
+info:
+  title: Palm Beach Times Recovery Bridge (development only)
+  version: 0.1.0
+  description: |
+    Authenticated transport contract for a PRIVATE server-side connector.
+    Never invoke production from an untrusted LLM URL or include PUBLISH_TOKEN
+    in a prompt, GitHub config, browser query parameter, or log.
+servers:
+  - url: https://palm-beach-times-staging.steven-a00.workers.dev
+    description: Isolated staging only; production is intentionally excluded.
+security:
+  - BearerAuth: []
+paths:
+  /api/recovery-artifact:
+    put:
+      operationId: storeRecoveryArtifact
+      summary: Store immutable, SHA-256-checked recovery bytes
+      parameters:
+        - {name: X-Edition-Date, in: header, required: true, schema: {type: string, format: date}}
+        - {name: X-Artifact-Name, in: header, required: true, schema: {type: string, enum: [html, comic, market_input, masthead, checkpoint]}}
+        - {name: X-Content-SHA256, in: header, required: true, schema: {type: string, pattern: '^[a-f0-9]{64}$'}}
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        '200': {description: Stored and read-back verified}
+        '401': {description: Unauthorized}
+        '409': {description: Existing immutable object conflict}
+        '413': {description: Size violation}
+        '422': {description: Digest or validity mismatch}
+    get:
+      operationId: retrieveRecoveryArtifact
+      summary: Retrieve byte-identical authenticated artifact
+      parameters:
+        - {name: date, in: query, required: true, schema: {type: string, format: date}}
+        - {name: name, in: query, required: true, schema: {type: string, enum: [html, comic, market_input, masthead, checkpoint]}}
+        - {name: sha256, in: query, required: true, schema: {type: string, pattern: '^[a-f0-9]{64}$'}}
+      responses:
+        '200':
+          description: Verified original bytes, NOT text reconstructed from response preview
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        '401': {description: Unauthorized}
+        '404': {description: Missing artifact}
+        '422': {description: Corrupt artifact}
+  /api/recovery-manifest:
+    get:
+      operationId: verifyRecoveryManifest
+      summary: Read checkpoint and verify all required assets
+      parameters:
+        - {name: date, in: query, required: true, schema: {type: string, format: date}}
+        - {name: sha256, in: query, required: true, schema: {type: string, pattern: '^[a-f0-9]{64}$'}}
+      responses:
+        '200':
+          description: All four assets verified; does NOT mean published or delivered
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, state, date, checkpointSha256, artifacts, publication, delivery]
+                properties:
+                  ok: {type: boolean, const: true}
+                  state: {type: string, const: complete}
+                  date: {type: string, format: date}
+                  checkpointSha256: {type: string}
+                  artifacts: {type: object}
+                  publication: {type: string, const: NOT_VERIFIED}
+                  delivery: {type: string, const: NOT_VERIFIED}
+        '401': {description: Unauthorized}
+        '404': {description: No checkpoint}
+        '409': {description: Incomplete checkpoint or missing asset}
+        '422': {description: Invalid or corrupt checkpoint or asset}
+components:
+  securitySchemes:
+    BearerAuth: {type: http, scheme: bearer}
