@@ -67,3 +67,23 @@ test('do not regress latest pointer',async()=>{
   const r=await worker.fetch(request('/api/activate',JSON.stringify({date,sha256:hash}),{'Authorization':'Bearer '+token,'Content-Type':'application/json'}),e);
   assert.equal(r.status,409);
 });
+
+test('recovery artifact survives separate requests and verifies exact bytes',async()=>{
+ const e=env(), bytes=new TextEncoder().encode('october-artifact');
+ const sha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');
+ const headers={'Authorization':'Bearer '+token,'X-Edition-Date':date,'X-Artifact-Name':'comic','X-Content-SHA256':sha};
+ const req=(method,body)=>new Request('https://staging.example.test/api/recovery-artifact',{method,headers,...(body?{body}:{})});
+ const put=await worker.fetch(req('PUT',bytes),e);assert.equal(put.status,200,await put.text());
+ const get=await worker.fetch(req('GET'),e);assert.equal(get.status,200,await get.text());
+ assert.deepEqual(new Uint8Array(await get.arrayBuffer()),bytes);
+ const repeat=await worker.fetch(req('PUT',bytes),e);assert.equal(repeat.status,200);
+ assert.equal(e.NEWSPAPERS.store.size,1);
+});
+test('recovery artifact rejects wrong digest and unauthenticated writes',async()=>{
+ const e=env(), bytes=new TextEncoder().encode('something');
+ const meta={'X-Edition-Date':date,'X-Artifact-Name':'comic','X-Content-SHA256':'0'.repeat(64)};
+ const put=(headers)=>worker.fetch(new Request('https://staging.example.test/api/recovery-artifact',{method:'PUT',headers,body:bytes}),e);
+ assert.equal((await put(meta)).status,401);
+ assert.equal((await put({...meta,Authorization:'Bearer '+token})).status,422);
+ assert.equal(e.NEWSPAPERS.store.size,0);
+});
