@@ -87,3 +87,39 @@ test('recovery artifact rejects wrong digest and unauthenticated writes',async()
  assert.equal((await put({...meta,Authorization:'Bearer '+token})).status,422);
  assert.equal(e.NEWSPAPERS.store.size,0);
 });
+
+test('recovery manifest rejects unauthenticated and incomplete checkpoints',async()=>{
+ const e=env();const day='2026-10-21';
+ const makeSha=async bytes=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');
+ const fake={schema:'pbt-edition-checkpoint-v1',editionDate:day,storageVerified:false,artifacts:{}};
+ const bytes=new TextEncoder().encode(JSON.stringify(fake));const sha=await makeSha(bytes);
+ await e.NEWSPAPERS.put('recovery/'+day+'/checkpoint/'+sha,bytes);
+ const url='https://staging.example.test/api/recovery-manifest?date='+day+'&sha256='+sha;
+ assert.equal((await worker.fetch(new Request(url),e)).status,401);
+ const response=await worker.fetch(new Request(url,{headers:{Authorization:'Bearer '+token}}),e);
+ assert.equal(response.status,409);
+ assert.equal((await response.json()).state,'incomplete');
+});
+test('recovery manifest verifies real artifact bytes before declaring complete',async()=>{
+ const e=env(),day='2026-10-21';
+ const makeSha=async bytes=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');
+ const assets={};
+ for(const name of ['html','comic','market_input','masthead']){
+   const bytes=new TextEncoder().encode('test-'+name);
+   const sha256=await makeSha(bytes);
+   await e.NEWSPAPERS.put('recovery/'+day+'/'+name+'/'+sha256,bytes);
+   assets[name]={sha256,bytes:bytes.byteLength,filename:name+'.bin'};
+ }
+ const manifest={schema:'pbt-edition-checkpoint-v1',editionDate:day,storageVerified:true,artifacts:assets,uploadId:null,acknowledgedChunks:0};
+ const bytes=new TextEncoder().encode(JSON.stringify(manifest)),sha=await makeSha(bytes);
+ await e.NEWSPAPERS.put('recovery/'+day+'/checkpoint/'+sha,bytes);
+ const url='https://staging.example.test/api/recovery-manifest?date='+day+'&sha256='+sha;
+ const request=()=>new Request(url,{headers:{Authorization:'Bearer '+token}});
+ const good=await worker.fetch(request(),e);
+ assert.equal(good.status,200);
+ assert.equal((await good.json()).state,'complete');
+ await e.NEWSPAPERS.put('recovery/'+day+'/comic/'+assets.comic.sha256,new TextEncoder().encode('BAD!!!'));
+ const bad=await worker.fetch(request(),e);
+ assert.equal(bad.status,422);
+ assert.equal((await bad.json()).state,'corrupt');
+});
