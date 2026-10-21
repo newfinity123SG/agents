@@ -7,7 +7,7 @@ const source=await readFile(new URL('./worker.js',import.meta.url),'utf8');
 const {default: worker}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
 class Bucket {
  constructor(){this.entries=new Map();}
- async get(k){const b=this.entries.get(k);return b?{size:b.byteLength,arrayBuffer:async()=>b.slice().buffer}:null;}
+ async get(k){const b=this.entries.get(k);return b?{size:b.byteLength,arrayBuffer:async()=>b.slice().buffer,text:async()=>new TextDecoder().decode(b),writeHttpMetadata:(headers)=>headers.set('Content-Type','text/html; charset=utf-8'),body:new Blob([b]).stream(),customMetadata:{date:k.match(/\d{4}-\d{2}-\d{2}/)?.[0]??'',sha256:''}}:null;}
  async put(k,body){this.entries.set(k,new Uint8Array(body).slice());}
 }
 const bucket=new Bucket(), env={NEWSPAPERS:bucket,PUBLISH_TOKEN:'local-test-token'};
@@ -68,4 +68,23 @@ test('manifest requires all authentic assets and detects tampering',async()=>{
  await bucket.put('recovery/'+date+'/comic/'+artifacts.comic.sha256,new TextEncoder().encode('bad'));
  const tampered=await worker.fetch(req(),env);
  assert.equal(tampered.status,409);
+});
+
+test('legacy stage activate and public routes preserve bytes',async()=>{
+ const date='2026-10-22';
+ const html='<!doctype html><html><body data-edition-date="'+date+'">'+('Fresh source-backed content. '.repeat(70))+'</body></html>';
+ const raw=new TextEncoder().encode(html);
+ const sha=Buffer.from(await crypto.subtle.digest('SHA-256',raw)).toString('hex');
+ const e={NEWSPAPERS:new Bucket(),PUBLISH_TOKEN:'local-test-token'};
+ const stage=await worker.fetch(new Request('https://staging.invalid/api/stage',{method:'POST',headers:{Authorization:'Bearer local-test-token','X-Edition-Date':date,'X-Content-SHA256':sha},body:raw}),e);
+ assert.equal(stage.status,200);
+ const activated=await worker.fetch(new Request('https://staging.invalid/api/activate',{method:'POST',headers:{Authorization:'Bearer local-test-token','Content-Type':'application/json'},body:JSON.stringify({date,sha256:sha})}),e);
+ assert.equal(activated.status,200,await activated.clone().text());
+ for(const path of ['/'+date,'/today']){
+  const response=await worker.fetch(new Request('https://staging.invalid'+path),e);
+  assert.equal(response.status,200,path);
+  assert.deepEqual(new Uint8Array(await response.arrayBuffer()),raw,path);
+ }
+ const older=await worker.fetch(new Request('https://staging.invalid/api/activate',{method:'POST',headers:{Authorization:'Bearer local-test-token','Content-Type':'application/json'},body:JSON.stringify({date:'2026-10-21',sha256:sha})}),e);
+ assert.equal(older.status,404);
 });
