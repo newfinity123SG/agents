@@ -1,0 +1,23 @@
+name: PBT MCP Recovery Build Check
+on:
+  push:
+    branches: [feature/pbt-mcp-recovery-tools]
+    paths:
+      - 'examples/mcp-worker-authenticated/**'
+      - '.github/workflows/pbt-mcp-recovery-check.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec vite build
+        working-directory: examples/mcp-worker-authenticated

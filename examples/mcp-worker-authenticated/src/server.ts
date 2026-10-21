@@ -603,6 +603,231 @@ function createServer(env: Env) {
     }
   );
 
+  // Recovery reads are bounded to avoid truncated MCP tool responses.
+  const artifactDate = z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/);
+  const artifactSha = z.string().regex(/^[a-f0-9]{64}$/);
+  const artifactName = z.enum(["html", "comic", "market_input", "masthead", "checkpoint"]);
+
+  server.registerTool(
+    "verify_recovery_manifest",
+    {
+      description: "Validate an immutable newspaper recovery checkpoint and all four stored assets. Does not publish or deliver.",
+      inputSchema: { date: artifactDate, sha256: artifactSha }
+    },
+    async ({ date, sha256 }) => {
+      try {
+        requireAuthorizedUser(env);
+        const token = requirePublishToken(env);
+        const params = new URLSearchParams({date, sha256});
+        const res = await publisherRequest(env, "/api/recovery-manifest?" + params, {
+          headers: { Authorization: "Bearer " + token }
+        });
+        const body = await res.text();
+        if (body.length > 16000) return textResult("Recovery manifest response exceeds safe MCP limit", true);
+        return textResult(body, !res.ok);
+      } catch (error) {
+        return textResult(error instanceof Error ? error.message : "Recovery verification error", true);
+      }
+    }
+  );
+
+  server.registerTool(
+    "store_recovery_artifact",
+    {
+      description: "Store a small immutable recovery artifact (max 16 KB base64 input). Larger newspaper assets require a future bounded chunk transfer; never truncate or split them manually.",
+      inputSchema: {
+        date: artifactDate, name: artifactName, sha256: artifactSha,
+        base64: z.string().min(1).max(22000)
+      }
+    },
+    async ({ date, name, sha256, base64 }) => {
+      try {
+        requireAuthorizedUser(env);
+        const token = requirePublishToken(env);
+        if (!/^[A-Za-z0-9+/]*={0,2}$/.test(base64) || base64.length % 4 !== 0)
+          return textResult("Invalid base64 encoding", true);
+        const binary = atob(base64);
+        if (!binary.length || binary.length > 16000)
+          return textResult("Artifact exceeds 16 KB tool limit; use a chunked recovery operation", true);
+        const bytes = Uint8Array.from(binary, ch => ch.charCodeAt(0));
+        const computed = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)))
+          .map(x => x.toString(16).padStart(2, "0")).join("");
+        if (computed !== sha256) return textResult("Recovery artifact SHA-256 mismatch", true);
+        const res = await publisherRequest(env, "/api/recovery-artifact", {
+          method: "PUT",
+          headers: {
+            Authorization: "Bearer " + token, "X-Edition-Date": date,
+            "X-Artifact-Name": name, "X-Content-SHA256": sha256,
+            "Content-Type": "application/octet-stream"
+          },
+          body: bytes
+        });
+        return textResult(await res.text(), !res.ok);
+      } catch (error) {
+        return textResult(error instanceof Error ? error.message : "Recovery storage error", true);
+      }
+    }
+  );
+
+  server.registerTool(
+    "get_recovery_artifact",
+    {
+      description: "Retrieve an exact small immutable recovery artifact as base64, with SHA-256 verification. Refuses responses larger than 16 KB.",
+      inputSchema: { date: artifactDate, name: artifactName, sha256: artifactSha }
+    },
+    async ({ date, name, sha256 }) => {
+      try {
+        requireAuthorizedUser(env);
+        const token = requirePublishToken(env);
+        const params = new URLSearchParams({date, name, sha256});
+        const res = await publisherRequest(env, "/api/recovery-artifact?" + params, {
+          headers: { Authorization: "Bearer " + token }
+        });
+        if (!res.ok) return textResult("Recovery retrieval HTTP " + res.status + ": " + (await res.text()).slice(0, 800), true);
+        if (Number(res.headers.get("Content-Length") || 0) > 16000)
+          return textResult("Artifact too large for bounded MCP retrieval", true);
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        if (!bytes.length || bytes.length > 16000)
+          return textResult("Artifact too large for bounded MCP retrieval", true);
+        const computed = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)))
+          .map(x => x.toString(16).padStart(2, "0")).join("");
+        if (computed !== sha256) return textResult("Retrieved artifact checksum mismatch", true);
+        const base64 = btoa(Array.from(bytes, b => String.fromCharCode(b)).join(""));
+        return textResult(JSON.stringify({ok:true,date,name,sha256,bytes:bytes.length,base64}));
+      } catch (error) {
+        return textResult(error instanceof Error ? error.message : "Recovery retrieval error", true);
+      }
+    }
+  );
+
+
+  // Full-size recovery upload: bounded independent KV chunks then checksum-verified commit.
+  // A distinct uploadId prevents mixing interrupted attempts from the same edition.
+  const uploadIdSchema = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/);
+  const chunkB64 = z.string().min(4).max(24000);
+  const recoveryChunkKey = (date: string, uploadId: string, index: number) =>
+    "pbt-recovery:" + date + ":" + uploadId + ":" + index;
+
+  server.registerTool(
+    "upload_recovery_chunk",
+    {
+      description: "Persist one bounded base64 binary chunk for a large recovery artifact. Resume only with the same uploadId and identical data.",
+      inputSchema: {
+        date: artifactDate, uploadId: uploadIdSchema,
+        index: z.number().int().min(0).max(799),
+        total: z.number().int().min(1).max(800),
+        base64: chunkB64
+      }
+    },
+    async ({date, uploadId, index, total, base64}) => {
+      try {
+        requireAuthorizedUser(env);
+        if(index>=total || base64.length%4!==0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64))
+          return textResult("Invalid chunk index or encoding",true);
+        const binary = atob(base64);
+        if(!binary.length || binary.length>18000) return textResult("Chunk exceeds 18 KB",true);
+        const key=recoveryChunkKey(date,uploadId,index);
+        const present=await env.OAUTH_KV.get(key);
+        const value=JSON.stringify({total,base64});
+        if(present && present!==value) return textResult("Conflicting existing chunk; create a new uploadId",true);
+        await env.OAUTH_KV.put(key,value,{expirationTtl:28800});
+        return textResult(JSON.stringify({ok:true,date,uploadId,index,total,bytes:binary.length,expiresInSeconds:28800}));
+      } catch(error) {
+        return textResult(error instanceof Error?error.message:"Recovery chunk storage error",true);
+      }
+    }
+  );
+
+  server.registerTool(
+    "finalize_recovery_artifact",
+    {
+      description: "Assemble a complete bounded chunk upload, verify its SHA-256 and commit it to immutable Publisher R2. Never publish or send to Slack.",
+      inputSchema: {
+        date: artifactDate,name:artifactName,sha256:artifactSha,
+        uploadId:uploadIdSchema,total:z.number().int().min(1).max(800)
+      }
+    },
+    async ({date,name,sha256,uploadId,total}) => {
+      try {
+        requireAuthorizedUser(env);
+        const token=requirePublishToken(env);
+        const parts: Uint8Array[]=[];
+        let size=0;
+        for(let i=0;i<total;i++){
+          const raw=await env.OAUTH_KV.get(recoveryChunkKey(date,uploadId,i));
+          if(!raw)return textResult("Missing recovery chunk "+i+"; retry finalization after KV propagation",true);
+          const rec=JSON.parse(raw) as {total:number,base64:string};
+          if(rec.total!==total || typeof rec.base64!=="string")return textResult("Chunk manifest mismatch "+i,true);
+          const bytes=Uint8Array.from(atob(rec.base64),ch=>ch.charCodeAt(0));
+          size+=bytes.byteLength;
+          if(size>12000000)return textResult("Recovery artifact exceeds 12 MB",true);
+          parts.push(bytes);
+        }
+        const merged=new Uint8Array(size);let offset=0;
+        for(const bytes of parts){merged.set(bytes,offset);offset+=bytes.length;}
+        const verified=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",merged)))
+          .map(x=>x.toString(16).padStart(2,"0")).join("");
+        if(verified!==sha256)return textResult("Complete recovery artifact digest mismatch",true);
+        const res=await publisherRequest(env,"/api/recovery-artifact",{
+          method:"PUT",
+          headers:{
+            Authorization:"Bearer "+token,"X-Edition-Date":date,
+            "X-Artifact-Name":name,"X-Content-SHA256":sha256,
+            "Content-Type":"application/octet-stream"
+          },body:merged
+        });
+        return textResult(await res.text(),!res.ok);
+      }catch(error){
+        return textResult(error instanceof Error?error.message:"Recovery finalization error",true);
+      }
+    }
+  );
+
+  server.registerTool(
+    "get_recovery_chunk",
+    {
+      description: "Retrieve one bounded slice of a verified immutable R2 artifact. Assemble every slice in order and reverify the final SHA-256.",
+      inputSchema:{
+        date:artifactDate,name:artifactName,sha256:artifactSha,
+        index:z.number().int().min(0).max(799)
+      }
+    },
+    async ({date,name,sha256,index})=>{
+      try{
+        requireAuthorizedUser(env);
+        const token=requirePublishToken(env);
+        const chunkBytes=18000;
+        const totalBytesResponse=await publisherRequest(env,"/api/recovery-artifact?"+
+          new URLSearchParams({date,name,sha256,offset:"0",length:"1"}),{
+          headers:{Authorization:"Bearer "+token}
+        });
+        if(!totalBytesResponse.ok)return textResult("Recovery artifact metadata HTTP "+totalBytesResponse.status,true);
+        const size=Number(totalBytesResponse.headers.get("X-Artifact-Bytes"));
+        if(!Number.isSafeInteger(size)||size<1||size>12000000)
+          return textResult("Recovery artifact has invalid size",true);
+        const total=Math.ceil(size/chunkBytes);
+        if(index>=total||total>800)return textResult("Recovery chunk index out of range",true);
+        const offset=index*chunkBytes,length=Math.min(chunkBytes,size-offset);
+        const params=new URLSearchParams({date,name,sha256,offset:String(offset),length:String(length)});
+        const res=await publisherRequest(env,"/api/recovery-artifact?"+params,{
+          headers:{Authorization:"Bearer "+token}
+        });
+        if(!res.ok)return textResult("Recovery byte-range HTTP "+res.status,true);
+        if(res.headers.get("X-Content-SHA256")!==sha ||
+           Number(res.headers.get("X-Range-Offset"))!==offset ||
+           Number(res.headers.get("X-Range-Length"))!==length)
+          return textResult("Recovery range metadata mismatch",true);
+        const slice=new Uint8Array(await res.arrayBuffer());
+        if(slice.length!==length)return textResult("Recovery range size mismatch",true);
+        const base64=btoa(Array.from(slice,b=>String.fromCharCode(b)).join(""));
+        return textResult(JSON.stringify({ok:true,date,name,sha256,index,total,bytes:size,base64,
+          verification:"FULL_SHA256_REQUIRED_AFTER_REASSEMBLY"}));
+      }catch(error){
+        return textResult(error instanceof Error?error.message:"Recovery chunk retrieval error",true);
+      }
+    }
+  );
+
   return server;
 }
 
