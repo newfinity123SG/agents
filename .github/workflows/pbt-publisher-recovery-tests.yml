@@ -1,0 +1,23 @@
+name: PBT Publisher Recovery Branch Tests
+on:
+  push:
+    branches:
+      - feature/pbt-publisher-recovery-api
+    paths:
+      - 'projects/palm-beach-times/publisher-production-baseline/**'
+      - '.github/workflows/pbt-publisher-recovery-tests.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  recovery-regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: JavaScript syntax
+        run: node --check projects/palm-beach-times/publisher-production-baseline/worker.js
+      - name: Recovery and legacy API tests
+        run: node --test projects/palm-beach-times/publisher-production-baseline/worker.test.mjs
