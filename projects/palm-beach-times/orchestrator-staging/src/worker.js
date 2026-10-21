@@ -1,3 +1,4 @@
+import {checkPublication} from "./publication-check.js";
 import {buildV6EditorialFragments} from "./v6-editorial-bridge.js";
 import {validateEditorialDraft} from "./editorial-output-validator.js";
 import {buildEditorialPackage} from "./editorial-package.js";
@@ -44,6 +45,7 @@ export default {
     if(req.method==="GET"&&url.pathname==="/health")
       return json({ok:true,service:"pbt-openai-orchestrator-staging",publishing:false,slack:false,
         scheduler:false,skillId:SKILL_ID,skillVersion:VERSION,editorialTrial:true});
+    const publicationCheck=req.method==="GET"&&url.pathname==="/api/publication-check";
     const bridge=req.method==="POST"&&url.pathname==="/api/v6-editorial-fragments";
     const draftValidate=req.method==="POST"&&url.pathname==="/api/validate-editorial-draft";
     const boundedEditorial=req.method==="POST"&&url.pathname==="/api/bounded-editorial-trial";
@@ -55,8 +57,12 @@ export default {
     const probe=req.method==="POST"&&url.pathname==="/api/skill-probe";
     const draft=req.method==="POST"&&url.pathname==="/api/editorial-trial";
     const status=req.method==="GET"&&url.pathname==="/api/editorial-status";
-    if(!bridge&&!draftValidate&&!boundedEditorial&&!packageRequest&&!quality&&!extraction&&!local&&!free&&!probe&&!draft&&!status)return json({ok:false,error:"Not found"},404);
+    if(!publicationCheck&&!bridge&&!draftValidate&&!boundedEditorial&&!packageRequest&&!quality&&!extraction&&!local&&!free&&!probe&&!draft&&!status)return json({ok:false,error:"Not found"},404);
     if(!authorized(req,env))return json({ok:false,error:"Unauthorized"},401);
+    if(publicationCheck){
+      const date=url.searchParams.get("date")||"";
+      return json(await checkPublication(date));
+    }
     if(bridge){
       const size=Number(req.headers.get("content-length")||0);
       if(size>131072)return json({ok:false,error:"Input too large"},413);
