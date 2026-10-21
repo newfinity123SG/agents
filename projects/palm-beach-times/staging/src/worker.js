@@ -67,6 +67,39 @@ export default {
    return new Response(bytes,{headers:{"Content-Type":"application/octet-stream",
      "Cache-Control":"no-store","X-Content-SHA256":expected}});
   }
+  if(path==="/api/recovery-manifest"&&request.method==="GET"){
+   if(!env.PUBLISH_TOKEN||request.headers.get("Authorization")!=="Bearer "+env.PUBLISH_TOKEN)
+    return json({ok:false,error:"Unauthorized"},401);
+   const date=url.searchParams.get("date")||"";
+   const sha256=url.searchParams.get("sha256")||"";
+   if(!validDate(date)||!/^[a-f0-9]{64}$/.test(sha256))
+    return json({ok:false,error:"Invalid manifest locator"},400);
+   const key="recovery/"+date+"/checkpoint/"+sha256;
+   const obj=await env.NEWSPAPERS.get(key);
+   if(!obj)return json({ok:false,state:"not_found",date},404);
+   if(obj.size>65536)return json({ok:false,state:"invalid",error:"Manifest too large"},422);
+   const bytes=await obj.arrayBuffer();
+   if(await digest(bytes)!==sha256)return json({ok:false,state:"invalid",error:"Manifest digest mismatch"},422);
+   let manifest;try{manifest=JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(bytes))}
+   catch{return json({ok:false,state:"invalid",error:"Malformed manifest"},422)}
+   if(manifest?.schema!=="pbt-edition-checkpoint-v1"||manifest?.editionDate!==date||
+      manifest?.storageVerified!==true)
+    return json({ok:false,state:"incomplete",date,error:"Not a committed verified checkpoint"},409);
+   const names=["html","comic","market_input","masthead"];
+   for(const name of names){
+    const rec=manifest?.artifacts?.[name];
+    if(!rec||!/^[a-f0-9]{64}$/.test(rec.sha256)||!Number.isSafeInteger(rec.bytes)||rec.bytes<1)
+     return json({ok:false,state:"incomplete",date,error:"Missing asset metadata: "+name},409);
+    const asset=await env.NEWSPAPERS.get("recovery/"+date+"/"+name+"/"+rec.sha256);
+    if(!asset||asset.size!==rec.bytes)
+     return json({ok:false,state:"incomplete",date,error:"Missing stored asset: "+name},409);
+    if(await digest(await asset.arrayBuffer())!==rec.sha256)
+     return json({ok:false,state:"corrupt",date,error:"Invalid stored asset: "+name},422);
+   }
+   return json({ok:true,state:"complete",date,manifestSha256:sha256,artifacts:manifest.artifacts,
+     uploadId:manifest.uploadId??null,acknowledgedChunks:manifest.acknowledgedChunks??0,
+     publication:"NOT_VERIFIED",delivery:"NOT_VERIFIED"});
+  }
   if(request.method!=="POST"||!["/api/stage","/api/activate"].includes(path))return json({ok:false,error:"Not found"},404);
   if(!env.PUBLISH_TOKEN||request.headers.get("Authorization")!=="Bearer "+env.PUBLISH_TOKEN)return json({ok:false,error:"Unauthorized"},401);
   if(path==="/api/stage"){
