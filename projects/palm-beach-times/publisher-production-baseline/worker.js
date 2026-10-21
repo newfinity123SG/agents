@@ -252,3 +252,34 @@ function json(data, status = 200) {
     status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
   });
 }
+
+const RECOVERY_TYPES = new Set(['html','comic','market_input','masthead','checkpoint']);
+async function recoveryArtifact(request, env, url) {
+  const blocked = authorized(request, env);
+  if (blocked) return blocked;
+  const get = request.method === 'GET';
+  const date = get ? url.searchParams.get('date') : request.headers.get('X-Edition-Date');
+  const name = get ? url.searchParams.get('name') : request.headers.get('X-Artifact-Name');
+  const sha = get ? url.searchParams.get('sha256') : request.headers.get('X-Content-SHA256');
+  if (!validDate(date) || !RECOVERY_TYPES.has(name) || !validHash(sha))
+    return json({ok:false,error:'Invalid recovery metadata'},400);
+  const key = 'recovery/' + date + '/' + name + '/' + sha;
+  if (!get) {
+    const bytes = await request.arrayBuffer();
+    if (!bytes.byteLength || bytes.byteLength > MAX_HTML_BYTES)
+      return json({ok:false,error:'Artifact size invalid'},413);
+    if (await digest(bytes) !== sha) return json({ok:false,error:'Digest mismatch'},422);
+    const previous = await env.NEWSPAPERS.get(key);
+    if (previous && (previous.size !== bytes.byteLength || await digest(await previous.arrayBuffer()) !== sha))
+      return json({ok:false,error:'Existing artifact mismatch'},409);
+    if (!previous) await env.NEWSPAPERS.put(key,bytes,{customMetadata:{date,name,sha256:sha}});
+    if (!await verifyObject(env.NEWSPAPERS,key,sha,bytes.byteLength))
+      return json({ok:false,error:'Artifact readback failed'},502);
+    return json({ok:true,stage:'ARTIFACT_VERIFIED',date,name,sha256:sha,bytes:bytes.byteLength});
+  }
+  const obj=await env.NEWSPAPERS.get(key);
+  if (!obj) return json({ok:false,error:'Artifact not found'},404);
+  const bytes=await obj.arrayBuffer();
+  if (await digest(bytes) !== sha) return json({ok:false,error:'Artifact checksum mismatch'},422);
+  return new Response(bytes,{headers:{'Content-Type':'application/octet-stream','Cache-Control':'no-store','X-Content-SHA256':sha}});
+}
