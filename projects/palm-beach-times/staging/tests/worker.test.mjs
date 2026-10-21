@@ -74,7 +74,7 @@ test('recovery artifact survives separate requests and verifies exact bytes',asy
  const headers={'Authorization':'Bearer '+token,'X-Edition-Date':date,'X-Artifact-Name':'comic','X-Content-SHA256':sha};
  const req=(method,body)=>new Request('https://staging.example.test/api/recovery-artifact',{method,headers,...(body?{body}:{})});
  const put=await worker.fetch(req('PUT',bytes),e);assert.equal(put.status,200,await put.text());
- const get=await worker.fetch(req('GET'),e);assert.equal(get.status,200,await get.text());
+ const get=await worker.fetch(req('GET'),e);assert.equal(get.status,200);
  assert.deepEqual(new Uint8Array(await get.arrayBuffer()),bytes);
  const repeat=await worker.fetch(req('PUT',bytes),e);assert.equal(repeat.status,200);
  assert.equal(e.NEWSPAPERS.store.size,1);
