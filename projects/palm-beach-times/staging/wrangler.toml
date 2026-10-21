@@ -1,0 +1,15 @@
+name = "palm-beach-times-staging"
+main = "src/worker.js"
+compatibility_date = "2026-10-14"
+workers_dev = true
+
+# Create this SEPARATE bucket manually or through authorized Cloudflare tooling.
+# Do not bind palm-beach-times production R2.
+[[r2_buckets]]
+binding = "NEWSPAPERS"
+bucket_name = "palm-beach-times-staging"
+
+# Set a staging-specific PUBLISH_TOKEN secret with wrangler secret put.
+# No cron triggers and no Slack integration.
+
+# Native Cloudflare Git integration: deploy only this staging Worker from the feature branch.

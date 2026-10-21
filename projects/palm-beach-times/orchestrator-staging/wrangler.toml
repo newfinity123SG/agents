@@ -1,0 +1,7 @@
+name = "palm-beach-times-orchestrator-staging"
+main = "src/worker.js"
+compatibility_date = "2026-10-14"
+workers_dev = true
+
+# No routes, cron triggers, R2 production bindings or Slack permissions.
+# Set two secrets on THIS Worker only: OPENAI_API_KEY and a separate PROBE_TOKEN.
