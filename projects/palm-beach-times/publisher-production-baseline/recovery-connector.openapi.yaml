@@ -1,0 +1,74 @@
+openapi: 3.1.0
+info:
+  title: Palm Beach Times Recovery Connector
+  version: 0.1.0
+  description: >-
+    Staging-only, authenticated immutable newspaper artifact storage.
+    This contract does not send Slack messages or activate production editions.
+servers:
+  - url: https://palm-beach-times-staging.steven-a00.workers.dev
+security:
+  - PublisherToken: []
+components:
+  securitySchemes:
+    PublisherToken:
+      type: http
+      scheme: bearer
+      description: Server-side secret; never embed token in task prompts or a public OpenAPI spec.
+  schemas:
+    RecoveryReceipt:
+      type: object
+      properties:
+        ok: {type: boolean}
+        date: {type: string, format: date}
+        name: {type: string}
+        sha256: {type: string}
+        bytes: {type: integer}
+paths:
+  /api/recovery-artifact:
+    put:
+      operationId: storeRecoveryArtifact
+      summary: Save one immutable content-addressed artifact.
+      parameters:
+        - {name: X-Edition-Date, in: header, required: true, schema: {type: string, format: date}}
+        - {name: X-Artifact-Name, in: header, required: true, schema: {type: string, enum: [html, comic, market_input, masthead, checkpoint]}}
+        - {name: X-Content-SHA256, in: header, required: true, schema: {type: string, pattern: '^[a-f0-9]{64}$'}}
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        '200':
+          description: Byte-verified R2 receipt.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RecoveryReceipt'}
+        '401': {description: Unauthorized}
+        '422': {description: SHA-256 mismatch}
+    get:
+      operationId: getRecoveryArtifact
+      summary: Fetch one verified immutable artifact as raw bytes.
+      parameters:
+        - {name: date, in: query, required: true, schema: {type: string, format: date}}
+        - {name: name, in: query, required: true, schema: {type: string, enum: [html, comic, market_input, masthead, checkpoint]}}
+        - {name: sha256, in: query, required: true, schema: {type: string, pattern: '^[a-f0-9]{64}$'}}
+      responses:
+        '200':
+          description: Original bytes, with X-Content-SHA256.
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        '404': {description: Missing artifact}
+  /api/recovery-manifest:
+    get:
+      operationId: verifyRecoveryManifest
+      summary: Verify complete checkpoint and every referenced asset against R2.
+      parameters:
+        - {name: date, in: query, required: true, schema: {type: string, format: date}}
+        - {name: sha256, in: query, required: true, schema: {type: string, pattern: '^[a-f0-9]{64}$'}}
+      responses:
+        '200': {description: Complete and byte-verified recovery inventory}
+        '404': {description: Checkpoint absent}
+        '409': {description: Checkpoint or asset inventory incomplete}
+        '422': {description: Checkpoint or stored artifact corrupt}
