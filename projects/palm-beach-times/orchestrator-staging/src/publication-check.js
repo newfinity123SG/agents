@@ -18,7 +18,7 @@ async function inspect(url, expectedDate, fetcher) {
   }catch(e){return {ok:false,error:"fetch_failed",detail:String(e?.name||"error").slice(0,80)};}
 }
 export async function checkPublication(date,fetcher=fetch) {
-  if(!/^20\\d{2}-(0[1-9]|1[0-2])-([0-2]\\d|3[01])$/.test(date))
+  if(!/^20\d{2}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/.test(date))
     return {ok:false,stage:"invalid_date",date};
   const [dated,today]=await Promise.all([
     inspect(BASE+"/"+date,date,fetcher),inspect(BASE+"/today",date,fetcher)
