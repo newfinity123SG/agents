@@ -11,3 +11,5 @@ bucket_name = "palm-beach-times-staging"
 
 # Set a staging-specific PUBLISH_TOKEN secret with wrangler secret put.
 # No cron triggers and no Slack integration.
+
+# Native Cloudflare Git integration: deploy only this staging Worker from the feature branch.
