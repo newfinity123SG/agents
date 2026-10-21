@@ -603,6 +603,103 @@ function createServer(env: Env) {
     }
   );
 
+  // Recovery reads are bounded to avoid truncated MCP tool responses.
+  const artifactDate = z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/);
+  const artifactSha = z.string().regex(/^[a-f0-9]{64}$/);
+  const artifactName = z.enum(["html", "comic", "market_input", "masthead", "checkpoint"]);
+
+  server.registerTool(
+    "verify_recovery_manifest",
+    {
+      description: "Validate an immutable newspaper recovery checkpoint and all four stored assets. Does not publish or deliver.",
+      inputSchema: { date: artifactDate, sha256: artifactSha }
+    },
+    async ({ date, sha256 }) => {
+      try {
+        requireAuthorizedUser(env);
+        const token = requirePublishToken(env);
+        const params = new URLSearchParams({date, sha256});
+        const res = await publisherRequest(env, "/api/recovery-manifest?" + params, {
+          headers: { Authorization: "Bearer " + token }
+        });
+        const body = await res.text();
+        if (body.length > 16000) return textResult("Recovery manifest response exceeds safe MCP limit", true);
+        return textResult(body, !res.ok);
+      } catch (error) {
+        return textResult(error instanceof Error ? error.message : "Recovery verification error", true);
+      }
+    }
+  );
+
+  server.registerTool(
+    "store_recovery_artifact",
+    {
+      description: "Store a small immutable recovery artifact (max 16 KB base64 input). Larger newspaper assets require a future bounded chunk transfer; never truncate or split them manually.",
+      inputSchema: {
+        date: artifactDate, name: artifactName, sha256: artifactSha,
+        base64: z.string().min(1).max(22000)
+      }
+    },
+    async ({ date, name, sha256, base64 }) => {
+      try {
+        requireAuthorizedUser(env);
+        const token = requirePublishToken(env);
+        if (!/^[A-Za-z0-9+/]*={0,2}$/.test(base64) || base64.length % 4 !== 0)
+          return textResult("Invalid base64 encoding", true);
+        const binary = atob(base64);
+        if (!binary.length || binary.length > 16000)
+          return textResult("Artifact exceeds 16 KB tool limit; use a chunked recovery operation", true);
+        const bytes = Uint8Array.from(binary, ch => ch.charCodeAt(0));
+        const computed = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)))
+          .map(x => x.toString(16).padStart(2, "0")).join("");
+        if (computed !== sha256) return textResult("Recovery artifact SHA-256 mismatch", true);
+        const res = await publisherRequest(env, "/api/recovery-artifact", {
+          method: "PUT",
+          headers: {
+            Authorization: "Bearer " + token, "X-Edition-Date": date,
+            "X-Artifact-Name": name, "X-Content-SHA256": sha256,
+            "Content-Type": "application/octet-stream"
+          },
+          body: bytes
+        });
+        return textResult(await res.text(), !res.ok);
+      } catch (error) {
+        return textResult(error instanceof Error ? error.message : "Recovery storage error", true);
+      }
+    }
+  );
+
+  server.registerTool(
+    "get_recovery_artifact",
+    {
+      description: "Retrieve an exact small immutable recovery artifact as base64, with SHA-256 verification. Refuses responses larger than 16 KB.",
+      inputSchema: { date: artifactDate, name: artifactName, sha256: artifactSha }
+    },
+    async ({ date, name, sha256 }) => {
+      try {
+        requireAuthorizedUser(env);
+        const token = requirePublishToken(env);
+        const params = new URLSearchParams({date, name, sha256});
+        const res = await publisherRequest(env, "/api/recovery-artifact?" + params, {
+          headers: { Authorization: "Bearer " + token }
+        });
+        if (!res.ok) return textResult("Recovery retrieval HTTP " + res.status + ": " + (await res.text()).slice(0, 800), true);
+        if (Number(res.headers.get("Content-Length") || 0) > 16000)
+          return textResult("Artifact too large for bounded MCP retrieval", true);
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        if (!bytes.length || bytes.length > 16000)
+          return textResult("Artifact too large for bounded MCP retrieval", true);
+        const computed = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)))
+          .map(x => x.toString(16).padStart(2, "0")).join("");
+        if (computed !== sha256) return textResult("Retrieved artifact checksum mismatch", true);
+        const base64 = btoa(Array.from(bytes, b => String.fromCharCode(b)).join(""));
+        return textResult(JSON.stringify({ok:true,date,name,sha256,bytes:bytes.length,base64}));
+      } catch (error) {
+        return textResult(error instanceof Error ? error.message : "Recovery retrieval error", true);
+      }
+    }
+  );
+
   return server;
 }
 
