@@ -813,7 +813,7 @@ function createServer(env: Env) {
           headers:{Authorization:"Bearer "+token}
         });
         if(!res.ok)return textResult("Recovery byte-range HTTP "+res.status,true);
-        if(res.headers.get("X-Content-SHA256")!==sha ||
+        if(res.headers.get("X-Content-SHA256")!==sha256 ||
            Number(res.headers.get("X-Range-Offset"))!==offset ||
            Number(res.headers.get("X-Range-Length"))!==length)
           return textResult("Recovery range metadata mismatch",true);
