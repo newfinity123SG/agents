@@ -278,6 +278,26 @@ async function recoveryArtifact(request, env, url) {
       return json({ok:false,error:'Artifact readback failed'},502);
     return json({ok:true,stage:'ARTIFACT_VERIFIED',date,name,sha256:sha,bytes:bytes.byteLength});
   }
+  // Optional bounded range retrieval. Caller must reassemble and verify the full digest.
+  const rawOffset = url.searchParams.get('offset');
+  const rawLength = url.searchParams.get('length');
+  if (get && rawOffset !== null && rawLength !== null) {
+    if (!/^(0|[1-9][0-9]*)$/.test(rawOffset) || !/^[1-9][0-9]*$/.test(rawLength))
+      return json({ok:false,error:'Invalid byte range'},400);
+    const offset = Number(rawOffset), length = Number(rawLength);
+    if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || length > 18000)
+      return json({ok:false,error:'Byte range exceeds 18 KB'},400);
+    const obj = await env.NEWSPAPERS.get(key, {range:{offset,length}});
+    if (!obj) return json({ok:false,error:'Artifact not found'},404);
+    const bytes = await obj.arrayBuffer();
+    if (bytes.byteLength !== length) return json({ok:false,error:'Incomplete byte range'},416);
+    return new Response(bytes,{headers:{
+      'Content-Type':'application/octet-stream','Cache-Control':'no-store',
+      'X-Content-SHA256':sha,'X-Range-Offset':String(offset),
+      'X-Range-Length':String(length),
+      'X-Artifact-Bytes':String(obj.size)
+    }});
+  }
   const obj=await env.NEWSPAPERS.get(key);
   if (!obj) return json({ok:false,error:'Artifact not found'},404);
   const bytes=await obj.arrayBuffer();

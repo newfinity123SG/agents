@@ -7,7 +7,7 @@ const source=await readFile(new URL('./worker.js',import.meta.url),'utf8');
 const {default: worker}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
 class Bucket {
  constructor(){this.entries=new Map();this.metadata=new Map();}
- async get(k){const b=this.entries.get(k);return b?{size:b.byteLength,arrayBuffer:async()=>b.slice().buffer,text:async()=>new TextDecoder().decode(b),writeHttpMetadata:(headers)=>headers.set('Content-Type','text/html; charset=utf-8'),body:new Blob([b]).stream(),customMetadata:this.metadata.get(k)||{}}:null;}
+ async get(k,opts={}){const full=this.entries.get(k);const b=full&&opts.range?full.slice(opts.range.offset,opts.range.offset+opts.range.length):full;return b?{size:full.byteLength,arrayBuffer:async()=>b.slice().buffer,text:async()=>new TextDecoder().decode(b),writeHttpMetadata:(headers)=>headers.set('Content-Type','text/html; charset=utf-8'),body:new Blob([b]).stream(),customMetadata:this.metadata.get(k)||{}}:null;}
  async put(k,body,options={}){this.entries.set(k,typeof body==='string'?new TextEncoder().encode(body):new Uint8Array(body).slice());this.metadata.set(k,options.customMetadata||{});}
 }
 const bucket=new Bucket(), env={NEWSPAPERS:bucket,PUBLISH_TOKEN:'local-test-token'};
@@ -107,4 +107,49 @@ test('staged older edition cannot roll back the latest edition',async()=>{
  const today=await worker.fetch(new Request('https://test.invalid/today'),e);
  assert.equal(today.status,200);
  assert.deepEqual(new Uint8Array(await today.arrayBuffer()),latest.data);
+});
+
+test('authenticated R2 byte-range retrieval returns exact slice and denies bad ranges',async()=>{
+ const e={NEWSPAPERS:new Bucket(),PUBLISH_TOKEN:'local-test-token'};
+ const raw=new TextEncoder().encode('a'.repeat(40001));
+ const sha=Buffer.from(await crypto.subtle.digest('SHA-256',raw)).toString('hex');
+ const key='recovery/2026-10-21/html/'+sha;
+ await e.NEWSPAPERS.put(key,raw);
+ const url='https://test.invalid/api/recovery-artifact?date=2026-10-21&name=html&sha256='+sha+'&offset=18000&length=18000';
+ const denied=await worker.fetch(new Request(url),e);
+ assert.equal(denied.status,401);
+ const result=await worker.fetch(new Request(url,{headers:{Authorization:'Bearer local-test-token'}}),e);
+ assert.equal(result.status,200);
+ assert.equal(Number(result.headers.get('X-Artifact-Bytes')),raw.length);
+ assert.equal(Number(result.headers.get('X-Range-Offset')),18000);
+ assert.deepEqual(new Uint8Array(await result.arrayBuffer()),raw.slice(18000,36000));
+ const excessive=await worker.fetch(new Request(url.replace('length=18000','length=18001'),{headers:{Authorization:'Bearer local-test-token'}}),e);
+ assert.equal(excessive.status,400);
+});
+
+test('large binary artifact round trip across many R2 ranges is exact',async()=>{
+ const e={NEWSPAPERS:new Bucket(),PUBLISH_TOKEN:'local-test-token'};
+ const raw=new Uint8Array(1024*1024+37);
+ for(let i=0;i<raw.length;i++) raw[i]=(i*37+11)%256;
+ const sha=Buffer.from(await crypto.subtle.digest('SHA-256',raw)).toString('hex');
+ const date='2026-10-21',name='html';
+ const uploaded=await worker.fetch(new Request('https://test.invalid/api/recovery-artifact',{
+   method:'PUT',headers:{Authorization:'Bearer local-test-token','X-Edition-Date':date,
+   'X-Artifact-Name':name,'X-Content-SHA256':sha},body:raw
+ }),e);
+ assert.equal(uploaded.status,200);
+ const rebuilt=new Uint8Array(raw.length);
+ for(let offset=0;offset<raw.length;offset+=18000){
+   const length=Math.min(18000,raw.length-offset);
+   const url='https://test.invalid/api/recovery-artifact?'+new URLSearchParams({
+     date,name,sha256:sha,offset:String(offset),length:String(length)
+   });
+   const result=await worker.fetch(new Request(url,{headers:{Authorization:'Bearer local-test-token'}}),e);
+   assert.equal(result.status,200,'range at '+offset);
+   assert.equal(Number(result.headers.get('X-Artifact-Bytes')),raw.length);
+   rebuilt.set(new Uint8Array(await result.arrayBuffer()),offset);
+ }
+ const recoveredHash=Buffer.from(await crypto.subtle.digest('SHA-256',rebuilt)).toString('hex');
+ assert.equal(recoveredHash,sha);
+ assert.deepEqual(rebuilt,raw);
 });

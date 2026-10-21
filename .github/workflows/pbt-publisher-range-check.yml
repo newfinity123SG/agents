@@ -1,0 +1,20 @@
+name: PBT Publisher Range Recovery Tests
+on:
+  push:
+    branches: [feature/pbt-publisher-range-recovery]
+    paths:
+      - 'projects/palm-beach-times/publisher-production-baseline/**'
+      - '.github/workflows/pbt-publisher-range-check.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check projects/palm-beach-times/publisher-production-baseline/worker.js
+      - run: node --test projects/palm-beach-times/publisher-production-baseline/worker.test.mjs
