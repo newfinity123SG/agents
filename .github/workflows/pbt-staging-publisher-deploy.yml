@@ -34,7 +34,10 @@ jobs:
           assert 'bucket_name = "palm-beach-times-staging"' in config
           assert 'bucket_name = "palm-beach-times"' not in config
           assert "[triggers]" not in config and "crons =" not in config
-          assert "slack" not in Path("staging/src/worker.js").read_text().lower().split("export default")[0]
+          source = Path("staging/src/worker.js").read_text().lower()
+          assert "slack.com/api" not in source
+          assert "hooks.slack.com" not in source
+          assert "palm-beach-times-publisher.steven-a00.workers.dev" not in source
           PY
       - name: Verify authorized Cloudflare credentials
         env:
