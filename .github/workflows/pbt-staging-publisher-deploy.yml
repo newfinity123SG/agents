@@ -1,0 +1,61 @@
+name: PBT Staging Publisher Deploy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pbt-staging-publisher
+  cancel-in-progress: false
+
+jobs:
+  deploy-staging:
+    if: github.ref == 'refs/heads/feature/pbt-cloudflare-shadow-migration'
+    runs-on: ubuntu-latest
+    environment: pbt-staging
+    defaults:
+      run:
+        working-directory: projects/palm-beach-times
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify isolated staging tests
+        run: node --test staging/tests/worker.test.mjs
+      - name: Verify isolated deployment config
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          config=Path("staging/wrangler.toml").read_text()
+          assert 'name = "palm-beach-times-staging"' in config
+          assert 'bucket_name = "palm-beach-times-staging"' in config
+          assert 'bucket_name = "palm-beach-times"' not in config
+          assert "[triggers]" not in config and "crons =" not in config
+          assert "slack" not in Path("staging/src/worker.js").read_text().lower().split("export default")[0]
+          PY
+      - name: Verify authorized Cloudflare credentials
+        env:
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          test -n "$CF_ACCOUNT"
+          test -n "$CF_TOKEN"
+      - name: Deploy isolated staging worker only
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx --yes wrangler@4 deploy --config staging/wrangler.toml
+      - name: Verify staging health endpoint
+        run: |
+          node - <<'JS'
+          const url="https://palm-beach-times-staging.steven-a00.workers.dev/health";
+          const response=await fetch(url,{signal:AbortSignal.timeout(12000)});
+          if(!response.ok)throw Error("Staging health HTTP "+response.status);
+          const body=await response.json();
+          if(body.service!=="pbt-staging-only"||body.scheduler!=="DISABLED"||body.delivery!=="DISABLED")
+            throw Error("Staging isolation health assertion failed");
+          console.log("Staging Publisher health verified; no production or Slack actions.");
+          JS
