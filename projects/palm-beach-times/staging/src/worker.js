@@ -34,6 +34,39 @@ export default {
    const info=await p.json();return read(env,info.key);
   }
   if(request.method==="GET"&&/^\/\d{4}-\d{2}-\d{2}$/.test(path))return read(env,"editions/"+path.slice(1)+".html");
+  // Artifact recovery: immutable content-addressed R2 writes, staging bucket only.
+  // This does not invoke the newspaper generator, OpenAI, Slack or production Publisher.
+  if(path==="/api/recovery-artifact"&&["PUT","GET"].includes(request.method)){
+   if(!env.PUBLISH_TOKEN||request.headers.get("Authorization")!=="Bearer "+env.PUBLISH_TOKEN)
+    return json({ok:false,error:"Unauthorized"},401);
+   const date=request.headers.get("X-Edition-Date")||"";
+   const name=request.headers.get("X-Artifact-Name")||"";
+   const expected=request.headers.get("X-Content-SHA256")||"";
+   if(!validDate(date)||!["html","comic","market_input","masthead","checkpoint"].includes(name)||
+      !/^[a-f0-9]{64}$/.test(expected))
+    return json({ok:false,error:"Invalid recovery metadata"},400);
+   const key="recovery/"+date+"/"+name+"/"+expected;
+   if(request.method==="PUT"){
+    const bytes=await request.arrayBuffer();
+    if(bytes.byteLength<1||bytes.byteLength>MAX_BYTES)return json({ok:false,error:"Invalid artifact size"},413);
+    if(await digest(bytes)!==expected)return json({ok:false,error:"Digest mismatch"},422);
+    const prior=await env.NEWSPAPERS.get(key);
+    if(prior){
+     if(prior.size!==bytes.byteLength||await digest(await prior.arrayBuffer())!==expected)
+      return json({ok:false,error:"Existing artifact corrupt"},409);
+    }else await env.NEWSPAPERS.put(key,bytes,{customMetadata:{date,name,sha256:expected}});
+    const check=await env.NEWSPAPERS.get(key);
+    if(!check||check.size!==bytes.byteLength||await digest(await check.arrayBuffer())!==expected)
+     return json({ok:false,error:"Artifact readback verification failed"},502);
+    return json({ok:true,stage:"ARTIFACT_VERIFIED",date,name,sha256:expected,bytes:bytes.byteLength});
+   }
+   const obj=await env.NEWSPAPERS.get(key);
+   if(!obj)return json({ok:false,error:"Artifact not found"},404);
+   const bytes=await obj.arrayBuffer();
+   if(await digest(bytes)!==expected)return json({ok:false,error:"Stored artifact digest mismatch"},502);
+   return new Response(bytes,{headers:{"Content-Type":"application/octet-stream",
+     "Cache-Control":"no-store","X-Content-SHA256":expected}});
+  }
   if(request.method!=="POST"||!["/api/stage","/api/activate"].includes(path))return json({ok:false,error:"Not found"},404);
   if(!env.PUBLISH_TOKEN||request.headers.get("Authorization")!=="Bearer "+env.PUBLISH_TOKEN)return json({ok:false,error:"Unauthorized"},401);
   if(path==="/api/stage"){
