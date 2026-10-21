@@ -604,7 +604,7 @@ function createServer(env: Env) {
   );
 
   // Recovery reads are bounded to avoid truncated MCP tool responses.
-  const artifactDate = z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/);
+  const artifactDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
   const artifactSha = z.string().regex(/^[a-f0-9]{64}$/);
   const artifactName = z.enum(["html", "comic", "market_input", "masthead", "checkpoint"]);
 
