@@ -44,6 +44,10 @@ jobs:
           node --check orchestrator-staging/src/local-source-diagnostic.js
           node --check orchestrator-staging/src/free-sources.js
           node --test orchestrator-staging/tests/free-sources.test.mjs
+      - name: Test read-only publication integrity probe
+        run: |
+          node --check orchestrator-staging/src/publication-check.js
+          node --test orchestrator-staging/src/publication-check.test.mjs
       - name: Reject production bucket binding or cron in staging
         run: |
           python - <<'PY'
