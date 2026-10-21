@@ -26,6 +26,7 @@ export default {
       if (request.method === 'POST' && path === '/api/stage') return stageEdition(request, env);
       if (request.method === 'POST' && path === '/api/activate') return activateEdition(request, env, url.origin);
       if (path === '/api/recovery-artifact' && ['GET','PUT'].includes(request.method)) return recoveryArtifact(request, env, url);
+      if (request.method === 'GET' && path === '/api/recovery-manifest') return recoveryManifest(request, env, url);
       return new Response('Not found', { status: 404 });
     } catch (error) {
       console.error('PBT publisher error:', error?.message || String(error));
@@ -282,4 +283,31 @@ async function recoveryArtifact(request, env, url) {
   const bytes=await obj.arrayBuffer();
   if (await digest(bytes) !== sha) return json({ok:false,error:'Artifact checksum mismatch'},422);
   return new Response(bytes,{headers:{'Content-Type':'application/octet-stream','Cache-Control':'no-store','X-Content-SHA256':sha}});
+}
+
+async function recoveryManifest(request, env, url) {
+  const blocked=authorized(request,env); if(blocked)return blocked;
+  const date=url.searchParams.get('date'), sha=url.searchParams.get('sha256');
+  if(!validDate(date)||!validHash(sha))return json({ok:false,error:'Invalid checkpoint locator'},400);
+  const checkpoint=await env.NEWSPAPERS.get('recovery/'+date+'/checkpoint/'+sha);
+  if(!checkpoint)return json({ok:false,state:'not_found'},404);
+  if(checkpoint.size>65536)return json({ok:false,state:'invalid',error:'Checkpoint too large'},422);
+  const raw=await checkpoint.arrayBuffer();
+  if(await digest(raw)!==sha)return json({ok:false,state:'corrupt',error:'Checkpoint checksum mismatch'},422);
+  let cp;
+  try{cp=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(raw))}
+  catch{return json({ok:false,state:'invalid',error:'Invalid checkpoint JSON'},422)}
+  if(cp?.schema!=='pbt-edition-checkpoint-v1'||cp?.editionDate!==date||cp?.storageVerified!==true)
+    return json({ok:false,state:'incomplete'},409);
+  for(const name of ['html','comic','market_input','masthead']){
+    const a=cp.artifacts?.[name];
+    if(!a||!validHash(a.sha256)||!Number.isSafeInteger(a.bytes)||a.bytes<1)
+      return json({ok:false,state:'incomplete',missing:name},409);
+    const stored=await env.NEWSPAPERS.get('recovery/'+date+'/'+name+'/'+a.sha256);
+    if(!stored||stored.size!==a.bytes)return json({ok:false,state:'incomplete',missing:name},409);
+    if(await digest(await stored.arrayBuffer())!==a.sha256)
+      return json({ok:false,state:'corrupt',artifact:name},422);
+  }
+  return json({ok:true,state:'complete',date,checkpointSha256:sha,artifacts:cp.artifacts,
+    publication:'NOT_VERIFIED',delivery:'NOT_VERIFIED'});
 }
