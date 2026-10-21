@@ -496,7 +496,7 @@ function createServer(env: Env) {
         requireAuthorizedUser(env);
 
         if (!env.SLACK_BOT_TOKEN) throw new Error("SLACK_BOT_TOKEN is not configured");
-        if (env.SLACK_CHANNEL_ID !== "C0BTU2G3LNS") throw new Error("Delivery blocked: SLACK_CHANNEL_ID must be the verified #personal-flo channel C0BTU2G3LNS");
+        if (env.SLACK_CHANNEL_ID !== "C0C66163K7D") throw new Error("Delivery blocked: SLACK_CHANNEL_ID must be the verified #news channel C0C66163K7D");
 
         const resolvedDate = date ?? todayNewYork();
         const path = `/${resolvedDate}`;
