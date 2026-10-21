@@ -8,7 +8,7 @@
   "keep_vars": true,
   "vars": {
     "ALLOWED_GITHUB_LOGIN": "newfinity123SG",
-    "SLACK_CHANNEL_ID": "C0BTU2G3LNS"
+    "SLACK_CHANNEL_ID": "C0C66163K7D"
   },
   "assets": {
     "not_found_handling": "single-page-application",
