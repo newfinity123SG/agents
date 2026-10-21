@@ -25,6 +25,7 @@ export default {
       if (request.method === 'POST' && path === '/api/publish') return publishEdition(request, env, url.origin);
       if (request.method === 'POST' && path === '/api/stage') return stageEdition(request, env);
       if (request.method === 'POST' && path === '/api/activate') return activateEdition(request, env, url.origin);
+      if (path === '/api/recovery-artifact' && ['GET','PUT'].includes(request.method)) return recoveryArtifact(request, env, url);
       return new Response('Not found', { status: 404 });
     } catch (error) {
       console.error('PBT publisher error:', error?.message || String(error));
