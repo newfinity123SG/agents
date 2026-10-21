@@ -6,9 +6,9 @@ globalThis.crypto ??= webcrypto;
 const source=await readFile(new URL('./worker.js',import.meta.url),'utf8');
 const {default: worker}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
 class Bucket {
- constructor(){this.entries=new Map();}
- async get(k){const b=this.entries.get(k);return b?{size:b.byteLength,arrayBuffer:async()=>b.slice().buffer,text:async()=>new TextDecoder().decode(b),writeHttpMetadata:(headers)=>headers.set('Content-Type','text/html; charset=utf-8'),body:new Blob([b]).stream(),customMetadata:{date:k.match(/\d{4}-\d{2}-\d{2}/)?.[0]??'',sha256:''}}:null;}
- async put(k,body){this.entries.set(k,new Uint8Array(body).slice());}
+ constructor(){this.entries=new Map();this.metadata=new Map();}
+ async get(k){const b=this.entries.get(k);return b?{size:b.byteLength,arrayBuffer:async()=>b.slice().buffer,text:async()=>new TextDecoder().decode(b),writeHttpMetadata:(headers)=>headers.set('Content-Type','text/html; charset=utf-8'),body:new Blob([b]).stream(),customMetadata:this.metadata.get(k)||{}}:null;}
+ async put(k,body,options={}){this.entries.set(k,typeof body==='string'?new TextEncoder().encode(body):new Uint8Array(body).slice());this.metadata.set(k,options.customMetadata||{});}
 }
 const bucket=new Bucket(), env={NEWSPAPERS:bucket,PUBLISH_TOKEN:'local-test-token'};
 const bytes=new TextEncoder().encode('recovery-safe-test');
