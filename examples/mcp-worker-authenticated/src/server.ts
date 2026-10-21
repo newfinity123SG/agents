@@ -796,21 +796,32 @@ function createServer(env: Env) {
       try{
         requireAuthorizedUser(env);
         const token=requirePublishToken(env);
-        const params=new URLSearchParams({date,name,sha256});
+        const chunkBytes=18000;
+        const totalBytesResponse=await publisherRequest(env,"/api/recovery-artifact?"+
+          new URLSearchParams({date,name,sha256,offset:"0",length:"1"}),{
+          headers:{Authorization:"Bearer "+token}
+        });
+        if(!totalBytesResponse.ok)return textResult("Recovery artifact metadata HTTP "+totalBytesResponse.status,true);
+        const size=Number(totalBytesResponse.headers.get("X-Artifact-Bytes"));
+        if(!Number.isSafeInteger(size)||size<1||size>12000000)
+          return textResult("Recovery artifact has invalid size",true);
+        const total=Math.ceil(size/chunkBytes);
+        if(index>=total||total>800)return textResult("Recovery chunk index out of range",true);
+        const offset=index*chunkBytes,length=Math.min(chunkBytes,size-offset);
+        const params=new URLSearchParams({date,name,sha256,offset:String(offset),length:String(length)});
         const res=await publisherRequest(env,"/api/recovery-artifact?"+params,{
           headers:{Authorization:"Bearer "+token}
         });
-        if(!res.ok)return textResult("Recovery artifact HTTP "+res.status,true);
-        const bytes=new Uint8Array(await res.arrayBuffer());
-        if(bytes.length>12000000)return textResult("Recovery artifact exceeds 12 MB",true);
-        const computed=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",bytes)))
-          .map(x=>x.toString(16).padStart(2,"0")).join("");
-        if(computed!==sha256)return textResult("Recovery artifact digest mismatch",true);
-        const chunkBytes=18000,total=Math.ceil(bytes.length/chunkBytes);
-        if(index>=total || total>800)return textResult("Recovery chunk index out of range",true);
-        const slice=bytes.subarray(index*chunkBytes,Math.min((index+1)*chunkBytes,bytes.length));
+        if(!res.ok)return textResult("Recovery byte-range HTTP "+res.status,true);
+        if(res.headers.get("X-Content-SHA256")!==sha ||
+           Number(res.headers.get("X-Range-Offset"))!==offset ||
+           Number(res.headers.get("X-Range-Length"))!==length)
+          return textResult("Recovery range metadata mismatch",true);
+        const slice=new Uint8Array(await res.arrayBuffer());
+        if(slice.length!==length)return textResult("Recovery range size mismatch",true);
         const base64=btoa(Array.from(slice,b=>String.fromCharCode(b)).join(""));
-        return textResult(JSON.stringify({ok:true,date,name,sha256,index,total,bytes:bytes.length,base64}));
+        return textResult(JSON.stringify({ok:true,date,name,sha256,index,total,bytes:size,base64,
+          verification:"FULL_SHA256_REQUIRED_AFTER_REASSEMBLY"}));
       }catch(error){
         return textResult(error instanceof Error?error.message:"Recovery chunk retrieval error",true);
       }
