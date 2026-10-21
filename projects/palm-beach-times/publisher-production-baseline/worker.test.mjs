@@ -88,3 +88,23 @@ test('legacy stage activate and public routes preserve bytes',async()=>{
  const older=await worker.fetch(new Request('https://staging.invalid/api/activate',{method:'POST',headers:{Authorization:'Bearer local-test-token','Content-Type':'application/json'},body:JSON.stringify({date:'2026-10-21',sha256:sha})}),e);
  assert.equal(older.status,404);
 });
+
+test('staged older edition cannot roll back the latest edition',async()=>{
+ const e={NEWSPAPERS:new Bucket(),PUBLISH_TOKEN:'local-test-token'};
+ const make=async date=>{
+  const data=new TextEncoder().encode('<!doctype html><html><body>'+date+' '+('verified content '.repeat(100))+'</body></html>');
+  const sha=Buffer.from(await crypto.subtle.digest('SHA-256',data)).toString('hex');
+  const stage=await worker.fetch(new Request('https://test.invalid/api/stage',{method:'POST',headers:{Authorization:'Bearer local-test-token','X-Edition-Date':date,'X-Content-SHA256':sha},body:data}),e);
+  assert.equal(stage.status,200);
+  return {date,sha,data};
+ };
+ const old=await make('2026-10-20'),latest=await make('2026-10-21');
+ const activate=async x=>worker.fetch(new Request('https://test.invalid/api/activate',{method:'POST',headers:{Authorization:'Bearer local-test-token','Content-Type':'application/json'},body:JSON.stringify({date:x.date,sha256:x.sha})}),e);
+ assert.equal((await activate(latest)).status,200);
+ const denied=await activate(old);
+ assert.equal(denied.status,409);
+ assert.match((await denied.json()).error,/Refusing to replace newer/);
+ const today=await worker.fetch(new Request('https://test.invalid/today'),e);
+ assert.equal(today.status,200);
+ assert.deepEqual(new Uint8Array(await today.arrayBuffer()),latest.data);
+});
